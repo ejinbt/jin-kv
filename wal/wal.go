@@ -96,97 +96,73 @@ func (w *WAL) Append(entry Entry) error {
 	return nil
 }
 
+// internal helper — reads one record and returns entry + bytes consumed
+// no lock, called from within already-locked functions
+func (w *WAL) readOne(reader *bufio.Reader) (Entry, int64, error) {
+	var crcBuf [4]byte
+	if _, err := io.ReadFull(reader, crcBuf[:]); err != nil {
+		return Entry{}, 0, err
+	}
+	storedCRC := binary.BigEndian.Uint32(crcBuf[:])
+
+	var termBuf [8]byte
+	if _, err := io.ReadFull(reader, termBuf[:]); err != nil {
+		return Entry{}, 0, err
+	}
+
+	var indexBuf [8]byte
+	if _, err := io.ReadFull(reader, indexBuf[:]); err != nil {
+		return Entry{}, 0, err
+	}
+
+	var dataLenBuf [4]byte
+	if _, err := io.ReadFull(reader, dataLenBuf[:]); err != nil {
+		return Entry{}, 0, err
+	}
+	dataLen := binary.BigEndian.Uint32(dataLenBuf[:])
+
+	data := make([]byte, dataLen)
+	if _, err := io.ReadFull(reader, data); err != nil {
+		return Entry{}, 0, err
+	}
+
+	entry := Entry{
+		Term:  binary.BigEndian.Uint64(termBuf[:]),
+		Index: binary.BigEndian.Uint64(indexBuf[:]),
+		Data:  data,
+	}
+
+	encoded := encode(entry)
+	if crc32.ChecksumIEEE(encoded) != storedCRC {
+		return Entry{}, 0, fmt.Errorf("checksum mismatch")
+	}
+
+	size := int64(4 + 8 + 8 + 4 + len(data))
+	return entry, size, nil
+}
+
 // ReadAll replays the entire WAL from the beginning
 // Stops at first corrupt or partial entry
 func (w *WAL) ReadAll() ([]Entry, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	// TODO:
-	// seek to beginning of file
+
 	if _, err := w.file.Seek(0, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("seek failed : %w", err)
+		return nil, fmt.Errorf("seek failed: %w", err)
 	}
-	// 2. read entries in a loop
+
 	var entries []Entry
 	reader := bufio.NewReader(w.file)
 
 	for {
-		// read checksum
-		var crcBuf [4]byte
-		_, err := io.ReadFull(reader, crcBuf[:])
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			// clean end of file -- we 're done
-			break
-		}
-
-		if err != nil {
-			// partial read - corrupted record
-			return nil, fmt.Errorf("failed to read checksum : %w", err)
-		}
-		storedCRC := binary.BigEndian.Uint32(crcBuf[:])
-
-		var termBuf [8]byte
-		_, err = io.ReadFull(reader, termBuf[:])
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			// clean end of file -- we 're done
-			break
-		}
-
-		if err != nil {
-			// partial read - corrupted record
-			return nil, fmt.Errorf("failed to read term : %w", err)
-		}
-
-		storedTerm := binary.BigEndian.Uint64(termBuf[:])
-
-		var indexBuf [8]byte
-		_, err = io.ReadFull(reader, indexBuf[:])
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			break
-		}
-
-		if err != nil {
-			return nil, fmt.Errorf("failed to read index : %w", err)
-		}
-
-		storedIndex := binary.BigEndian.Uint64(indexBuf[:])
-
-		var dataLenBuf [4]byte
-		_, err = io.ReadFull(reader, dataLenBuf[:])
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			break
-		}
-
-		if err != nil {
-			return nil, fmt.Errorf("failed to read data length : %w", err)
-		}
-
-		storedDataLen := binary.BigEndian.Uint32(dataLenBuf[:])
-
-		data := make([]byte, storedDataLen)
-		_, err = io.ReadFull(reader, data)
+		entry, _, err := w.readOne(reader)
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to read data : %w", err)
-		}
-
-		// reconstruct what encode() would have produced
-		encoded := encode(Entry{Term: storedTerm, Index: storedIndex, Data: data})
-
-		// recompute checksum and compare
-		if crc32.ChecksumIEEE(encoded) != storedCRC {
-			// checksum mismatch - corrupted record , stop here
 			break
 		}
-
-		// checksum good - this entry is valid
-		entries = append(entries, Entry{
-			Term:  storedTerm,
-			Index: storedIndex,
-			Data:  data,
-		})
+		entries = append(entries, entry)
 	}
 	return entries, nil
 }
@@ -194,12 +170,38 @@ func (w *WAL) ReadAll() ([]Entry, error) {
 // TruncateAfter removes all entries after the given index
 // Used when a follower's log conflicts with the leader's
 func (w *WAL) TruncateAfter(index uint64) error {
-	// TODO:
-	// 1. read all entries
-	// 2. find the offset of the first entry with Index > index
-	// 3. truncate file at that offset
-	// 4. fdatasync
-	return nil
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if _, err := w.file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("seek failed : %w", err)
+	}
+	var offset int64
+	reader := bufio.NewReader(w.file)
+
+	for {
+		entry, size, err := w.readOne(reader)
+		if err != nil {
+			break
+		}
+		offset += size
+		if entry.Index == index {
+			if err := w.file.Truncate(offset); err != nil {
+				return fmt.Errorf("truncate failed : %w", err)
+			}
+			if err := w.file.Sync(); err != nil {
+				return fmt.Errorf("sync failed: %w", err)
+			}
+			if _, err := w.file.Seek(0, io.SeekEnd); err != nil {
+				return fmt.Errorf("seek to end failed: %w", err)
+			}
+
+			return nil
+		}
+
+	}
+	return fmt.Errorf("index %d not found", index)
+
 }
 
 // Close cleanly shuts down the WAL
