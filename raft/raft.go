@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ejinbt/jinkv/rpc"
+	"github.com/ejinbt/jinkv/transport"
 	"github.com/ejinbt/jinkv/wal"
 )
 
@@ -77,6 +78,20 @@ func (r *Raft) resetElectionTimer() {
 
 }
 
+func (r *Raft) becomeLeader() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.state = Leader
+	lastIndex, _ := r.lastLogIndexAndTerm()
+
+	for _, peer := range r.peers {
+		r.nextIndex[peerToID(peer)] = lastIndex + 1
+		r.matchIndex[peerToID(peer)] = 0
+	}
+
+}
+
 func (r *Raft) requestVotes() {
 	var lastLogIndex uint64
 	var lastLogTerm uint64
@@ -95,9 +110,37 @@ func (r *Raft) requestVotes() {
 	}
 	fmt.Printf("%d", args.Term)
 
+	votes := 1 // vote for self , already counted
+	var voteMu sync.Mutex
+	majority := len(r.peers)/2 + 1
+
 	for _, peer := range r.peers {
 		go func(peer string) {
 			// TODO: send args to peer over the network, handle reply
+			reply, err := transport.SendRequestVote(peer, args)
+			if err != nil {
+				return // peer unreachable , just skip it
+			}
+
+			voteMu.Lock()
+			defer voteMu.Unlock()
+
+			// if peer's term is ahead , step down immediately
+			if reply.Term > r.currentTerm {
+				r.mu.Lock()
+				r.currentTerm = reply.Term
+				r.state = Follower
+				r.votedFor = nil
+				r.mu.Unlock()
+				return
+			}
+
+			if reply.VoteGranted {
+				votes++
+				if votes >= majority && r.state == Candidate {
+					r.becomeLeader() // not written , next step
+				}
+			}
 		}(peer)
 	}
 }
