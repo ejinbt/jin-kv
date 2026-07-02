@@ -16,6 +16,9 @@ const (
 	Follower State = iota
 	Candidate
 	Leader
+)
+
+const (
 	electionTimeoutMin = 150
 	electionTimeoutMax = 300
 )
@@ -97,6 +100,60 @@ func (r *Raft) requestVotes() {
 			// TODO: send args to peer over the network, handle reply
 		}(peer)
 	}
+}
+
+func (r *Raft) lastLogIndexAndTerm() (uint64, uint64) {
+	if len(r.log) == 0 {
+		return 0, 0
+	}
+
+	last := r.log[len(r.log)-1]
+	return last.Index, last.Term
+}
+
+func (r *Raft) isCandidateLogUpToDate(candiateLastLogTerm, candidateLastLogIndex uint64) bool {
+
+	userIndex, userTerm := r.lastLogIndexAndTerm()
+
+	if candiateLastLogTerm > userTerm {
+		return true
+	} else if candiateLastLogTerm == userTerm {
+		if candidateLastLogIndex >= userIndex {
+			return true
+		} else {
+			return false
+		}
+	} else {
+		return false
+	}
+}
+
+func (r *Raft) HandleRequestVote(args rpc.RequestVoteArgs) rpc.RequestVoteReply {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if args.Term < r.currentTerm {
+		return rpc.RequestVoteReply{Term: r.currentTerm, VoteGranted: false}
+	}
+
+	if args.Term > r.currentTerm {
+		r.currentTerm = args.Term
+		r.votedFor = nil
+		r.state = Follower
+	}
+
+	voteOK := r.votedFor == nil || *r.votedFor == args.CandidateID
+	logOk := r.isCandidateLogUpToDate(args.LastLogTerm, args.LastLogIndex)
+
+	if voteOK && logOk {
+		candidateID := args.CandidateID
+		r.votedFor = &candidateID
+		r.resetElectionTimer()
+		return rpc.RequestVoteReply{Term: r.currentTerm, VoteGranted: true}
+	} else {
+		return rpc.RequestVoteReply{Term: r.currentTerm, VoteGranted: false}
+	}
+
 }
 
 func (r *Raft) becomeCandidate() {
