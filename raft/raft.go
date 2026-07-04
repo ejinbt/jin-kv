@@ -7,9 +7,12 @@ import (
 	"time"
 
 	"github.com/ejinbt/jinkv/rpc"
-	"github.com/ejinbt/jinkv/transport"
 	"github.com/ejinbt/jinkv/wal"
 )
+
+type Transport interface {
+	SendRequestVote(peerAddr string, args rpc.RequestVoteArgs) (rpc.RequestVoteReply, error)
+}
 
 type State int
 
@@ -41,13 +44,14 @@ type Raft struct {
 	// node metadata
 	id            uint64
 	state         State
-	peers         []string
+	peers         map[uint64]string
 	mu            sync.Mutex
 	wal           *wal.WAL
 	electionTimer *time.Timer
+	transport     Transport
 }
 
-func NewRaft(id uint64, peers []string, w *wal.WAL) *Raft {
+func NewRaft(id uint64, peers map[uint64]string, w *wal.WAL, t Transport) *Raft {
 	return &Raft{
 		id:          id,
 		peers:       peers,
@@ -60,6 +64,7 @@ func NewRaft(id uint64, peers []string, w *wal.WAL) *Raft {
 		state:       Follower,
 		nextIndex:   make(map[uint64]uint64),
 		matchIndex:  make(map[uint64]uint64),
+		transport:   t,
 	}
 }
 
@@ -85,11 +90,10 @@ func (r *Raft) becomeLeader() {
 	r.state = Leader
 	lastIndex, _ := r.lastLogIndexAndTerm()
 
-	for _, peer := range r.peers {
-		r.nextIndex[peerToID(peer)] = lastIndex + 1
-		r.matchIndex[peerToID(peer)] = 0
+	for peerID := range r.peers {
+		r.matchIndex[peerID] = lastIndex + 1
+		r.matchIndex[peerID] = 0
 	}
-
 }
 
 func (r *Raft) requestVotes() {
@@ -114,10 +118,10 @@ func (r *Raft) requestVotes() {
 	var voteMu sync.Mutex
 	majority := len(r.peers)/2 + 1
 
-	for _, peer := range r.peers {
-		go func(peer string) {
+	for peerID, peerAddr := range r.peers {
+		go func(peerID uint64, peerAddr string) {
 			// TODO: send args to peer over the network, handle reply
-			reply, err := transport.SendRequestVote(peer, args)
+			reply, err := r.transport.SendRequestVote(peerAddr, args)
 			if err != nil {
 				return // peer unreachable , just skip it
 			}
@@ -141,7 +145,7 @@ func (r *Raft) requestVotes() {
 					r.becomeLeader() // not written , next step
 				}
 			}
-		}(peer)
+		}(peerID, peerAddr)
 	}
 }
 

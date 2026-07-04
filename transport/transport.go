@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 
+	"github.com/ejinbt/jinkv/raft"
 	"github.com/ejinbt/jinkv/rpc"
 )
 
@@ -18,59 +19,113 @@ const (
 	MsgAppendEntriesReply MessageType = 4
 )
 
+// writeMessage writes a framed message: [type][length][payload]
+func writeMessage(conn net.Conn, msgType MessageType, payload []byte) error {
+	if _, err := conn.Write([]byte{byte(msgType)}); err != nil {
+		return fmt.Errorf("failed to write message type: %w", err)
+	}
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(payload)))
+	if _, err := conn.Write(lenBuf[:]); err != nil {
+		return fmt.Errorf("failed to write length: %w", err)
+	}
+	if _, err := conn.Write(payload); err != nil {
+		return fmt.Errorf("failed to write payload: %w", err)
+	}
+	return nil
+}
+
+// readMessage reads a framed message: [type][length][payload]
+func readMessage(conn net.Conn) (MessageType, []byte, error) {
+	var msgTypeBuf [1]byte
+	if _, err := io.ReadFull(conn, msgTypeBuf[:]); err != nil {
+		return 0, nil, fmt.Errorf("failed to read message type: %w", err)
+	}
+
+	var lenBuf [4]byte
+	if _, err := io.ReadFull(conn, lenBuf[:]); err != nil {
+		return 0, nil, fmt.Errorf("failed to read length: %w", err)
+	}
+	msgLen := binary.BigEndian.Uint32(lenBuf[:])
+
+	payload := make([]byte, msgLen)
+	if _, err := io.ReadFull(conn, payload); err != nil {
+		return 0, nil, fmt.Errorf("failed to read payload: %w", err)
+	}
+
+	return MessageType(msgTypeBuf[0]), payload, nil
+}
+
 // SendRequestVote dials a peer, sends a RequestVoteArgs, and returns the reply
 func SendRequestVote(peerAddr string, args rpc.RequestVoteArgs) (rpc.RequestVoteReply, error) {
-	// TODO:
-	// 1. dial the peer
 	conn, err := net.Dial("tcp", peerAddr)
 	if err != nil {
 		return rpc.RequestVoteReply{}, err
 	}
-
 	defer conn.Close()
-	// 2. encode args
+
 	encodedArgs, err := rpc.EncodeRequestVoteArgs(args)
 	if err != nil {
-
-		return rpc.RequestVoteReply{}, fmt.Errorf("failed to encode args : %w ", err)
-	}
-	// 3. write messageType byte
-	if _, err := conn.Write([]byte{byte(MsgRequestVoteArgs)}); err != nil {
-		return rpc.RequestVoteReply{}, fmt.Errorf("failed to write message type : %w", err)
-	}
-	// 4. write length-prefixed payload
-	var lenBuf [4]byte
-	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(encodedArgs)))
-	if _, err := conn.Write(lenBuf[:]); err != nil {
-		return rpc.RequestVoteReply{}, fmt.Errorf("failed to write length: %w", err)
+		return rpc.RequestVoteReply{}, fmt.Errorf("failed to encode args: %w", err)
 	}
 
-	if _, err := conn.Write(encodedArgs); err != nil {
-		return rpc.RequestVoteReply{}, fmt.Errorf("failed to write payload: %w", err)
+	if err := writeMessage(conn, MsgRequestVoteArgs, encodedArgs); err != nil {
+		return rpc.RequestVoteReply{}, err
 	}
 
-	// 5. read back the reply (messageType, length, payload)
-	var msgTypeBuf [1]byte
-	if msgTypeBuf[0] != byte(MsgRequestVoteReply) {
-		return rpc.RequestVoteReply{}, fmt.Errorf("unexpected message type: %d", msgTypeBuf[0])
+	msgType, payload, err := readMessage(conn)
+	if err != nil {
+		return rpc.RequestVoteReply{}, err
 	}
-	if _, err := io.ReadFull(conn, msgTypeBuf[:]); err != nil {
-		return rpc.RequestVoteReply{}, fmt.Errorf("failed to read message type : %w", err)
-	}
-	var replyLenBuf [4]byte
-	if _, err := io.ReadFull(conn, replyLenBuf[:]); err != nil {
-		return rpc.RequestVoteReply{}, fmt.Errorf("failed to read reply length : %w", err)
+	if msgType != MsgRequestVoteReply {
+		return rpc.RequestVoteReply{}, fmt.Errorf("unexpected message type: %d", msgType)
 	}
 
-	replyLen := binary.BigEndian.Uint32(replyLenBuf[:])
+	return rpc.DecodeRequestVoteReply(payload)
+}
 
-	replyData := make([]byte, replyLen)
-	if _, err := io.ReadFull(conn, replyData); err != nil {
-		return rpc.RequestVoteReply{}, fmt.Errorf("failed to read reply payload : %w", err)
+// StartServer begins listening for incoming RPCs and dispatches them to r (raft)
+func startServer(address string, r *raft.Raft) error {
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return fmt.Errorf("failed to listen : %w", err)
 	}
-	// 6. decode reply
-	decodedReply, err := rpc.DecodeRequestVoteReply(replyData)
 
-	// 7. return it
-	return decodedReply, err
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			continue // log and keep serving other connections
+		}
+		go handleConnection(conn, r)
+	}
+}
+
+func handleConnection(conn net.Conn, r *raft.Raft) {
+	defer conn.Close()
+
+	msgType, payload, err := readMessage(conn)
+
+	if err != nil {
+		return // connection closed or malformed message , just drop it
+	}
+
+	switch msgType {
+	case MsgRequestVoteArgs:
+		args, err := rpc.DecodeRequestVoteArgs(payload)
+		if err != nil {
+			return
+		}
+
+		reply := r.HandleRequestVote(args)
+		encodedReply, err := rpc.EncodeRequestVoteReply(reply)
+		if err != nil {
+			return
+		}
+
+		writeMessage(conn, MsgRequestVoteReply, encodedReply)
+
+	default:
+		// unknown message type , drop the connection
+		return
+	}
 }
