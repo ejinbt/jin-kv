@@ -1,60 +1,37 @@
 package main
 
 import (
-	"fmt"
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
 
+	"flag"
+
+	"github.com/ejinbt/jinkv/raft"
+	"github.com/ejinbt/jinkv/transport"
 	"github.com/ejinbt/jinkv/wal"
 )
 
 func main() {
-	// open the WAL
-	w, err := wal.Open("test.wal")
-	if err != nil {
-		log.Fatalf("failed to open WAL : %v", err)
+	myID := flag.Uint64("id", 1, "this node's ID")
+	myAddr := flag.String("addr", ":8080", "this node's address")
+	flag.Parse()
+	peers := map[uint64]string{
+		2: "localhost:8081",
+		3: "localhost:8082",
 	}
 
+	w, err := wal.Open("node1.wal")
+	if err != nil {
+		log.Fatalf("failed to open WAL: %v", err)
+	}
 	defer w.Close()
 
-	// check if we are recovering or writing fresh
-	entries, err := w.ReadAll()
-	if err != nil {
-		log.Fatalf("failed to read WAL : %v", err)
+	t := transport.NewClient()
+	r := raft.NewRaft(*myID, peers, w, t)
+
+	r.Start() // strats the election timer + loop
+
+	// this blocks forever , serving incoming RPCs
+	if err := transport.StartServer(*myAddr, r); err != nil {
+		log.Fatalf("server failed : %v", err)
 	}
-
-	if len(entries) > 0 {
-		// RECOVERY PATH
-		fmt.Printf("recovered %d entries:\n", len(entries))
-		for _, e := range entries {
-			term := e.Term
-			index := e.Index
-			data := e.Data
-			fmt.Printf("term=%d index=%d data=%s\n", term, index, data)
-		}
-		fmt.Println("recovery successful")
-		os.Exit(0)
-	}
-	// FRESH WRITE PATH
-	appendEntry := func(e wal.Entry) {
-		if err := w.Append(e); err != nil {
-			log.Fatalf("failed to append entry %d: %v", e.Index, err)
-		}
-	}
-
-	appendEntry(wal.Entry{Term: 1, Index: 1, Data: []byte("set x=1")})
-	appendEntry(wal.Entry{Term: 1, Index: 2, Data: []byte("set y=2")})
-	appendEntry(wal.Entry{Term: 1, Index: 3, Data: []byte("set z=3")})
-	appendEntry(wal.Entry{Term: 2, Index: 4, Data: []byte("del x")})
-	appendEntry(wal.Entry{Term: 2, Index: 5, Data: []byte("set x=99")})
-
-	fmt.Printf("wrote 5 entries , now run kill -9 on this process")
-	fmt.Printf("my PID is %d\n", os.Getpid())
-
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
-	fmt.Println("waiting - run kill -9 in another terminal")
-	<-sig
 }

@@ -12,12 +12,18 @@ import (
 
 type MessageType byte
 
+type Client struct{}
+
 const (
 	MsgRequestVoteArgs    MessageType = 1
 	MsgRequestVoteReply   MessageType = 2
 	MsgAppendEntriesArgs  MessageType = 3
 	MsgAppendEntriesReply MessageType = 4
 )
+
+func NewClient() *Client {
+	return &Client{}
+}
 
 // writeMessage writes a framed message: [type][length][payload]
 func writeMessage(conn net.Conn, msgType MessageType, payload []byte) error {
@@ -57,7 +63,7 @@ func readMessage(conn net.Conn) (MessageType, []byte, error) {
 }
 
 // SendRequestVote dials a peer, sends a RequestVoteArgs, and returns the reply
-func SendRequestVote(peerAddr string, args rpc.RequestVoteArgs) (rpc.RequestVoteReply, error) {
+func (c *Client) SendRequestVote(peerAddr string, args rpc.RequestVoteArgs) (rpc.RequestVoteReply, error) {
 	conn, err := net.Dial("tcp", peerAddr)
 	if err != nil {
 		return rpc.RequestVoteReply{}, err
@@ -85,7 +91,7 @@ func SendRequestVote(peerAddr string, args rpc.RequestVoteArgs) (rpc.RequestVote
 }
 
 // StartServer begins listening for incoming RPCs and dispatches them to r (raft)
-func startServer(address string, r *raft.Raft) error {
+func StartServer(address string, r *raft.Raft) error {
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return fmt.Errorf("failed to listen : %w", err)

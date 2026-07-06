@@ -2,6 +2,7 @@ package raft
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
 	"sync"
 	"time"
@@ -94,6 +95,7 @@ func (r *Raft) becomeLeader() {
 		r.matchIndex[peerID] = lastIndex + 1
 		r.matchIndex[peerID] = 0
 	}
+	log.Printf("[node %d] BECAME LEADER , term %d", r.id, r.currentTerm)
 }
 
 func (r *Raft) requestVotes() {
@@ -119,6 +121,9 @@ func (r *Raft) requestVotes() {
 	majority := len(r.peers)/2 + 1
 
 	for peerID, peerAddr := range r.peers {
+		if peerID == r.id {
+			continue // don't send RPC to self , already voted for self in becomeCandidate
+		}
 		go func(peerID uint64, peerAddr string) {
 			// TODO: send args to peer over the network, handle reply
 			reply, err := r.transport.SendRequestVote(peerAddr, args)
@@ -196,9 +201,13 @@ func (r *Raft) HandleRequestVote(args rpc.RequestVoteArgs) rpc.RequestVoteReply 
 		candidateID := args.CandidateID
 		r.votedFor = &candidateID
 		r.resetElectionTimer()
-		return rpc.RequestVoteReply{Term: r.currentTerm, VoteGranted: true}
+		reply := rpc.RequestVoteReply{Term: r.currentTerm, VoteGranted: true}
+		log.Printf("[node %d] vote request from %d , granted=%v", r.id, args.CandidateID, reply.VoteGranted)
+		return reply
 	} else {
-		return rpc.RequestVoteReply{Term: r.currentTerm, VoteGranted: false}
+		reply := rpc.RequestVoteReply{Term: r.currentTerm, VoteGranted: false}
+		log.Printf("[node %d] vote request from %d , granted=%v", r.id, args.CandidateID, reply.VoteGranted)
+		return reply
 	}
 
 }
@@ -212,14 +221,22 @@ func (r *Raft) becomeCandidate() {
 	selfID := r.id
 	r.votedFor = &selfID
 	r.resetElectionTimer()
-	r.requestVotes() // yet to write this
+	r.requestVotes()
+
+	log.Printf("[node %d] become candidate, term %d", r.id, r.currentTerm)
+
 }
 
 func (r *Raft) electionLoop() {
 	for {
 		<-r.electionTimer.C
+		r.mu.Lock()
+		state := r.state
+		r.mu.Unlock()
 		// timer fired with no reset - become candiate
-		r.becomeCandidate()
+		if state != Leader {
+			r.becomeCandidate()
+		}
 	}
 }
 
