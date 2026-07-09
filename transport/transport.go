@@ -90,6 +90,32 @@ func (c *Client) SendRequestVote(peerAddr string, args rpc.RequestVoteArgs) (rpc
 	return rpc.DecodeRequestVoteReply(payload)
 }
 
+func (c *Client) SendAppendEntries(peerAddr string, args rpc.AppendEntriesArgs) (rpc.AppendEntriesReply, error) {
+	conn, err := net.Dial("tcp", peerAddr)
+	if err != nil {
+		return rpc.AppendEntriesReply{}, err
+	}
+
+	defer conn.Close()
+	encodedArgs, err := rpc.EncodeAppendEntriesArgs(args)
+	if err != nil {
+		return rpc.AppendEntriesReply{}, fmt.Errorf("failed to encode args :%w", err)
+	}
+
+	if err := writeMessage(conn, MsgAppendEntriesArgs, encodedArgs); err != nil {
+		return rpc.AppendEntriesReply{}, err
+	}
+	msgType, payload, err := readMessage(conn)
+	if err != nil {
+		return rpc.AppendEntriesReply{}, err
+	}
+	if msgType != MsgAppendEntriesReply {
+		return rpc.AppendEntriesReply{}, fmt.Errorf("unexpected message type: %d", msgType)
+	}
+
+	return rpc.DecodeAppendEntriesReply(payload)
+}
+
 // StartServer begins listening for incoming RPCs and dispatches them to r (raft)
 func StartServer(address string, r *raft.Raft) error {
 	listener, err := net.Listen("tcp", address)
@@ -129,7 +155,20 @@ func handleConnection(conn net.Conn, r *raft.Raft) {
 		}
 
 		writeMessage(conn, MsgRequestVoteReply, encodedReply)
+	case MsgAppendEntriesArgs:
+		args, err := rpc.DecodeAppendEntriesArgs(payload)
+		if err != nil {
+			return
+		}
 
+		reply := r.HandleAppendEntries(args)
+
+		encodedReply, err := rpc.EncodeAppendEntriesReply(reply)
+		if err != nil {
+			return
+		}
+
+		writeMessage(conn, MsgAppendEntriesReply, encodedReply)
 	default:
 		// unknown message type , drop the connection
 		return

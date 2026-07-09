@@ -67,6 +67,14 @@ func decode(buf []byte) (Entry, error) {
 
 }
 
+func EncodeEntry(entry Entry) []byte {
+	return encode(entry)
+}
+
+func DecodeEntry(buf []byte) (Entry, error) {
+	return decode(buf)
+}
+
 // Append writes a single entry durably to the WAL
 // It must fsync before returning
 func (w *WAL) Append(entry Entry) error {

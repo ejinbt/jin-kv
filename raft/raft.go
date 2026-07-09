@@ -13,6 +13,7 @@ import (
 
 type Transport interface {
 	SendRequestVote(peerAddr string, args rpc.RequestVoteArgs) (rpc.RequestVoteReply, error)
+	SendAppendEntries(peerAddr string, args rpc.AppendEntriesArgs) (rpc.AppendEntriesReply, error)
 }
 
 type State int
@@ -92,9 +93,10 @@ func (r *Raft) becomeLeader() {
 	lastIndex, _ := r.lastLogIndexAndTerm()
 
 	for peerID := range r.peers {
-		r.matchIndex[peerID] = lastIndex + 1
-		r.matchIndex[peerID] = 0
+		r.nextIndex[peerID] = lastIndex + 1 // optimistic guess: peer needs everything from here on
+		r.matchIndex[peerID] = 0            // don't yet know what's actually replicated
 	}
+	go r.heartBeatLoop()
 	log.Printf("[node %d] BECAME LEADER , term %d", r.id, r.currentTerm)
 }
 
@@ -125,7 +127,6 @@ func (r *Raft) requestVotes() {
 			continue // don't send RPC to self , already voted for self in becomeCandidate
 		}
 		go func(peerID uint64, peerAddr string) {
-			// TODO: send args to peer over the network, handle reply
 			reply, err := r.transport.SendRequestVote(peerAddr, args)
 			if err != nil {
 				return // peer unreachable , just skip it
@@ -212,6 +213,29 @@ func (r *Raft) HandleRequestVote(args rpc.RequestVoteArgs) rpc.RequestVoteReply 
 
 }
 
+func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntriesReply {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if args.Term < r.currentTerm {
+		return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
+	}
+
+	if args.Term >= r.currentTerm && r.state != Follower {
+		r.state = Follower
+	}
+
+	if args.Term > r.currentTerm {
+		r.currentTerm = args.Term
+		r.votedFor = nil
+	}
+
+	reply := rpc.AppendEntriesReply{Term: r.currentTerm, Success: true}
+	r.resetElectionTimer()
+	return reply
+
+}
+
 func (r *Raft) becomeCandidate() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -236,6 +260,52 @@ func (r *Raft) electionLoop() {
 		// timer fired with no reset - become candiate
 		if state != Leader {
 			r.becomeCandidate()
+		}
+	}
+}
+
+func (r *Raft) heartBeatLoop() {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		r.mu.Lock()
+		if r.state != Leader {
+			r.mu.Unlock()
+			return // no longer leader , stop sending heartbeats
+		}
+
+		currentTerm := r.currentTerm
+		leaderID := r.id
+		r.mu.Unlock()
+
+		for peerID, peerAddr := range r.peers {
+			if peerID == r.id {
+				continue
+			}
+
+			go func(peerAddr string) {
+				args := rpc.AppendEntriesArgs{
+					Term:     currentTerm,
+					LeaderID: leaderID,
+					// Entries left empty , this is a heartbeat only
+					// real log replication comes later in phase 31
+				}
+				reply, err := r.transport.SendAppendEntries(peerAddr, args)
+				if err != nil {
+					return
+				}
+				// if a peer's term is ahead of ours , we've been
+				// superseded - step down immediately
+				// (safety rule) same as in requestVotes
+				if reply.Term > currentTerm {
+					r.mu.Lock()
+					r.currentTerm = reply.Term
+					r.state = Follower
+					r.votedFor = nil
+					r.mu.Unlock()
+				}
+			}(peerAddr)
 		}
 	}
 }
