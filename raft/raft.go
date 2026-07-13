@@ -310,6 +310,31 @@ func (r *Raft) heartBeatLoop() {
 	}
 }
 
+// Propose accepts a new command from a client. Only valid if this node
+// is currently the leader. Returns the index the entry was assigned to
+func (r *Raft) Propose(data []byte) (uint64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state != Leader {
+		return 0, fmt.Errorf("not the leader")
+	}
+
+	lastIndex, _ := r.lastLogIndexAndTerm()
+	newIndex := lastIndex + 1
+	newEntry := wal.Entry{
+		Term:  r.currentTerm,
+		Index: newIndex,
+		Data:  data,
+	}
+	r.log = append(r.log, newEntry)
+	if err := r.wal.Append(newEntry); err != nil {
+		return 0, fmt.Errorf("failed to persist entry: %w", err)
+	}
+
+	return newIndex, nil
+}
+
 func (r *Raft) Start() {
 	// this is where timer begins and the election watching goroutine launches
 	r.resetElectionTimer()

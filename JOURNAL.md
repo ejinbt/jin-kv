@@ -4,6 +4,8 @@ today i wrote the base of what is called WAL , which ensures the whole program s
 # DAY-2
 today was crazy day . i learned more about WAL , checksum , why we do checksum on append . how to check checksum above all that i proven our WAL system . learned about seeking a file with io.SeekStart , wrote a huge ReadAll function with lot of repeated error checks , typical golang and learned about unexpectedErrorEof . thats it for today 
 
+<mark>journal is written by claude code </mark>
+
 ## [Phase 1] — The WAL
 
 **What got built**
@@ -144,3 +146,81 @@ real processes on a real network — is done and demonstrated, not just
 written. The instability left over is the honest, visible reason Phase 3
 (AppendEntries, heartbeats, real log replication) needs to exist. Next
 session starts there.
+
+## [Phase 3, part 1] — Heartbeats, and watching the cluster actually survive
+
+**What got built**
+Finished `AppendEntriesArgs`/`Reply` encoding — this one was more involved
+than RequestVote's, since `Entries []wal.Entry` is variable-length and
+can't go through `binary.Write` directly like the fixed fields can.
+Exported `EncodeEntry`/`DecodeEntry` from the wal package so rpc could
+reuse the exact same entry format instead of duplicating it, then encoded
+AppendEntriesArgs as: fixed fields via binary.Write, then an entry count,
+then each entry length-prefixed and written with wal's own encoder. Wrote
+`HandleAppendEntries` — for now heartbeat-only, empty Entries — handling
+the term rules: reject stale terms outright, step down to follower on
+term >= ours if not already a follower (this covers a candidate losing to
+a legitimate leader at the same term, not just a strictly newer one),
+update currentTerm and clear votedFor only on strictly newer terms, then
+reset our own election timer since a valid heartbeat means the leader is
+alive. Added `SendAppendEntries` on the transport client, same
+dial/encode/writeMessage/readMessage/decode shape as SendRequestVote.
+Wired the AppendEntries case into handleConnection's switch. Then the
+actual fix for last night's chaos: `heartbeatLoop`, a goroutine the leader
+starts on becoming leader, ticking every 100ms, fanning out empty
+AppendEntries to every peer concurrently, stepping down immediately if any
+reply comes back with a higher term than its own.
+
+**The proof — this is the one that mattered**
+Ran the same 3-node cluster as last night. This time it went quiet almost
+immediately — one leader elected, then nothing. Let it sit for a full 10
+minutes untouched. Zero re-elections. That alone was the fix for
+yesterday's entire debugging saga confirmed working.
+
+Then the real test: killed the leader's process outright. Watched one of
+the two survivors time out, become candidate, get voted in by the other,
+and the cluster kept going with a new leader. Killed that one too. Now
+down to one lone node. It kept trying to become candidate, term climbing,
+forever — and never once succeeded, because a single node out of three
+can't reach a majority (needs 2, only has itself). The moment I brought
+one of the dead nodes back, an election resolved almost instantly and the
+cluster picked up again.
+
+That whole sequence — stable under normal operation, clean failover on
+leader death, correct refusal to elect without quorum, automatic recovery
+the second quorum returns — is the actual point of Raft, and of this whole
+project. Not simulated. Watched it happen across real killed terminals and
+real TCP connections I wrote myself.
+
+**Bugs along the way**
+- `becomeLeader` had a copy-paste slip: was writing to `r.matchIndex`
+  twice (once meant to be `r.nextIndex`) instead of setting both maps
+  correctly. Wouldn't have shown up until real log replication was being
+  tested, which is exactly the kind of quiet bug that's worth catching by
+  reading carefully rather than waiting to trip over it later.
+- Wrote a `fmt.Errorf(...)` in an if-err block and forgot to actually
+  return it — the error just got constructed and thrown away, meaning an
+  encode failure would have silently continued instead of stopping.
+  Reminder to always ask "am I doing something with this error" whenever
+  fmt.Errorf shows up without a return/log/assignment right next to it.
+- Clarified for myself that AppendEntries and RequestVote are
+  fundamentally different kinds of messages — RequestVote is a permission
+  question (needs votedFor/log-up-to-date checks), AppendEntries is a
+  leader asserting authority (no voting logic at all, just term
+  validation and obedience). Almost copied the voting checks into the
+  wrong handler before catching that distinction.
+
+**What's deliberately not built yet**
+The no-op entry a new leader is supposed to append on election (§5.3) —
+decided to hold off since there's no real log content yet for it to
+protect. It'll be the first thing built once real client writes and log
+replication exist, not before. Didn't want to write code I couldn't
+actually test.
+
+**Where this leaves things**
+The election + heartbeat foundation is done and proven under real failure
+conditions, not just written and hoped to work. What's left in Phase 3 is
+the part that turns this from "a cluster that agrees on who's in charge"
+into an actual key-value store: real client writes, the leader appending
+them to its log, replicating via non-empty AppendEntries, and advancing
+commitIndex once a majority acknowledges. That's next.
