@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"sort"
 	"sync"
 	"time"
 
@@ -51,6 +52,12 @@ type Raft struct {
 	wal           *wal.WAL
 	electionTimer *time.Timer
 	transport     Transport
+}
+
+type peerData struct {
+	entries   []wal.Entry
+	prevIndex uint64
+	prevTerm  uint64
 }
 
 func NewRaft(id uint64, peers map[uint64]string, w *wal.WAL, t Transport) *Raft {
@@ -230,6 +237,29 @@ func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntries
 		r.votedFor = nil
 	}
 
+	// consistency check
+	if args.PrevLogIndex > 0 {
+		prevSlicePos := args.PrevLogIndex - 1
+
+		if prevSlicePos >= uint64(len(r.log)) {
+			// we don't have entry at this index - we're missing entries
+			return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
+		}
+
+		if r.log[prevSlicePos].Term != args.PrevLogTerm {
+			return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
+		}
+
+	}
+
+	// consistency check passed - safe to append new entries
+	r.log = append(r.log, args.Entries...)
+	for _, entry := range args.Entries {
+		if err := r.wal.Append(entry); err != nil {
+			return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
+		}
+	}
+
 	reply := rpc.AppendEntriesReply{Term: r.currentTerm, Success: true}
 	r.resetElectionTimer()
 	return reply
@@ -264,6 +294,47 @@ func (r *Raft) electionLoop() {
 	}
 }
 
+// tryAdvanceCommitIndex checks if a majority of peers have replicated
+// a higher index than our current commitIndex, and advances it if so.
+// Caller must hold r.mu
+func (r *Raft) tryAdvanceCommitIndex() {
+	// every matchIndex including the leaders
+	var everyMatchIndex []uint64
+	leaderMatchIndex, _ := r.lastLogIndexAndTerm()
+
+	for _, matchIdx := range r.matchIndex {
+		everyMatchIndex = append(everyMatchIndex, matchIdx)
+	}
+
+	everyMatchIndex = append(everyMatchIndex, leaderMatchIndex)
+
+	sort.Slice(everyMatchIndex, func(i, j int) bool {
+		return everyMatchIndex[i] > everyMatchIndex[j] // descending order
+	})
+
+	majorityIndex := everyMatchIndex[len(everyMatchIndex)/2]
+
+	if majorityIndex == 0 {
+		return // nothing to commit yet
+	}
+
+	entrySlicePos := majorityIndex - 1
+	if entrySlicePos >= uint64(len(r.log)) {
+		return // shouldn't happen , but guard against out-of-range
+	}
+
+	entryAtMajority := r.log[entrySlicePos]
+
+	if entryAtMajority.Term != r.currentTerm {
+		// this entry is from a PREVIOUS term - cannot commit it directly
+		// per 5.4.2 , even though majority has it
+		return
+	}
+
+	r.commitIndex = majorityIndex
+
+}
+
 func (r *Raft) heartBeatLoop() {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -277,6 +348,25 @@ func (r *Raft) heartBeatLoop() {
 
 		currentTerm := r.currentTerm
 		leaderID := r.id
+
+		// snapshot exactly what each peer needs WHIL STILL LOCKED
+
+		peerSnapshots := make(map[uint64]peerData)
+		for peerID := range r.peers {
+			prevIndex := r.nextIndex[peerID] - 1
+			var prevTerm uint64
+			if prevIndex > 0 {
+				prevTerm = r.log[prevIndex-1].Term
+			}
+
+			peerSnapshots[peerID] = peerData{
+				entries:   r.log[r.nextIndex[peerID]-1:],
+				prevIndex: prevIndex,
+				prevTerm:  prevTerm,
+			}
+
+		}
+
 		r.mu.Unlock()
 
 		for peerID, peerAddr := range r.peers {
@@ -284,12 +374,15 @@ func (r *Raft) heartBeatLoop() {
 				continue
 			}
 
-			go func(peerAddr string) {
+			snap := peerSnapshots[peerID]
+			go func(peerID uint64, peerAddr string, snap peerData) {
+
 				args := rpc.AppendEntriesArgs{
-					Term:     currentTerm,
-					LeaderID: leaderID,
-					// Entries left empty , this is a heartbeat only
-					// real log replication comes later in phase 31
+					Term:         currentTerm,
+					LeaderID:     leaderID,
+					PrevLogIndex: snap.prevIndex,
+					PrevLogTerm:  snap.prevTerm,
+					Entries:      snap.entries,
 				}
 				reply, err := r.transport.SendAppendEntries(peerAddr, args)
 				if err != nil {
@@ -305,7 +398,21 @@ func (r *Raft) heartBeatLoop() {
 					r.votedFor = nil
 					r.mu.Unlock()
 				}
-			}(peerAddr)
+				r.mu.Lock()
+				if reply.Success == true {
+					if len(snap.entries) > 0 {
+						lastSent := snap.entries[len(snap.entries)-1]
+						r.matchIndex[peerID] = lastSent.Index
+						r.nextIndex[peerID] = lastSent.Index + 1
+					}
+					// if snap.entries was empty (pure heartbeat) , nothing changes . already upto date
+				} else {
+					if r.nextIndex[peerID] > 1 {
+						r.nextIndex[peerID]--
+					}
+				}
+				r.mu.Unlock()
+			}(peerID, peerAddr, snap)
 		}
 	}
 }
