@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/ejinbt/jinkv/raft"
 	"github.com/ejinbt/jinkv/rpc"
@@ -64,7 +65,7 @@ func readMessage(conn net.Conn) (MessageType, []byte, error) {
 
 // SendRequestVote dials a peer, sends a RequestVoteArgs, and returns the reply
 func (c *Client) SendRequestVote(peerAddr string, args rpc.RequestVoteArgs) (rpc.RequestVoteReply, error) {
-	conn, err := net.Dial("tcp", peerAddr)
+	conn, err := net.DialTimeout("tcp", peerAddr, 200*time.Millisecond)
 	if err != nil {
 		return rpc.RequestVoteReply{}, err
 	}
@@ -91,7 +92,7 @@ func (c *Client) SendRequestVote(peerAddr string, args rpc.RequestVoteArgs) (rpc
 }
 
 func (c *Client) SendAppendEntries(peerAddr string, args rpc.AppendEntriesArgs) (rpc.AppendEntriesReply, error) {
-	conn, err := net.Dial("tcp", peerAddr)
+	conn, err := net.DialTimeout("tcp", peerAddr, 200*time.Millisecond)
 	if err != nil {
 		return rpc.AppendEntriesReply{}, err
 	}

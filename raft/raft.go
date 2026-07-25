@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,41 @@ const (
 	electionTimeoutMax = 300
 )
 
+type StateMachine struct {
+	mu   sync.Mutex
+	data map[string]string
+}
+
+func NewStateMachine() *StateMachine {
+	return &StateMachine{data: make(map[string]string)}
+}
+
+// Apply parses a command string like "set x=1" and update the
+// state machine accordingly . Caller does not need to hold the lock
+func (s *StateMachine) Apply(entry wal.Entry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	parts := strings.Fields(string(entry.Data)) // ["set","x=1"]
+	if len(parts) != 2 || parts[0] != "set" {
+		return // unrecognized command , ignore
+	}
+
+	kv := strings.SplitN(parts[1], "=", 2)
+	if len(kv) != 2 {
+		return // malformed key=value , ignore
+	}
+	key, value := kv[0], kv[1]
+	s.data[key] = value
+}
+
+func (s *StateMachine) Get(key string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	val, ok := s.data[key]
+	return val, ok
+}
+
 type Raft struct {
 	// persistent state
 	currentTerm uint64
@@ -52,6 +88,7 @@ type Raft struct {
 	wal           *wal.WAL
 	electionTimer *time.Timer
 	transport     Transport
+	stateMachine  *StateMachine
 }
 
 type peerData struct {
@@ -60,21 +97,31 @@ type peerData struct {
 	prevTerm  uint64
 }
 
-func NewRaft(id uint64, peers map[uint64]string, w *wal.WAL, t Transport) *Raft {
+func NewRaft(id uint64, peers map[uint64]string, w *wal.WAL, t Transport, s *StateMachine) *Raft {
 	return &Raft{
-		id:          id,
-		peers:       peers,
-		wal:         w,
-		currentTerm: 0,
-		votedFor:    nil,
-		log:         nil,
-		commitIndex: 0,
-		lastApplied: 0,
-		state:       Follower,
-		nextIndex:   make(map[uint64]uint64),
-		matchIndex:  make(map[uint64]uint64),
-		transport:   t,
+		id:           id,
+		peers:        peers,
+		wal:          w,
+		currentTerm:  0,
+		votedFor:     nil,
+		log:          nil,
+		commitIndex:  0,
+		lastApplied:  0,
+		state:        Follower,
+		nextIndex:    make(map[uint64]uint64),
+		matchIndex:   make(map[uint64]uint64),
+		transport:    t,
+		stateMachine: s,
 	}
+}
+
+// Get retrieves the current value for a key from this node's state
+// machine. Note: this reads local state directly and does not guarantee
+// linearizability — see §8 of the Raft paper for what a proper
+// linearizable read requires (leader confirmation + no-op check).
+// Good enough for testing; not yet safe for a real client-facing read.
+func (r *Raft) Get(key string) (string, bool) {
+	return r.stateMachine.Get(key)
 }
 
 func (r *Raft) resetElectionTimer() {
@@ -97,6 +144,7 @@ func (r *Raft) becomeLeader() {
 	defer r.mu.Unlock()
 
 	r.state = Leader
+	r.resetElectionTimer() // stop reacting to a timer that shouldn't matter anymore
 	lastIndex, _ := r.lastLogIndexAndTerm()
 
 	for peerID := range r.peers {
@@ -253,8 +301,37 @@ func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntries
 	}
 
 	// consistency check passed - safe to append new entries
-	r.log = append(r.log, args.Entries...)
-	for _, entry := range args.Entries {
+	appendFrom := 0
+
+	for i, newEntry := range args.Entries {
+		slicePos := newEntry.Index - 1
+
+		if slicePos < uint64(len(r.log)) {
+			// we already have SOMETHING at this index
+			if r.log[slicePos].Term != newEntry.Term {
+				// conflict! discard this entry and everything after it
+				// on both the in-memory log and the durable WAL
+				r.log = r.log[:newEntry.Index-1]
+				if err := r.wal.TruncateAfter(newEntry.Index - 1); err != nil {
+					return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
+				}
+				appendFrom = i
+				break
+			}
+			// no conflict , this entry already exists correctly - skip it
+			appendFrom = i + 1
+		} else {
+			// this entry doesn't exist yet at all - start appending from here
+			appendFrom = i
+			break
+		}
+
+	}
+
+	entriesToAppend := args.Entries[appendFrom:]
+
+	r.log = append(r.log, entriesToAppend...)
+	for _, entry := range entriesToAppend {
 		if err := r.wal.Append(entry); err != nil {
 			return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
 		}
@@ -333,6 +410,12 @@ func (r *Raft) tryAdvanceCommitIndex() {
 
 	r.commitIndex = majorityIndex
 
+	// apply newly-commited entries to the state machine
+	for r.lastApplied < r.commitIndex {
+		r.lastApplied++
+		entryToApply := r.log[r.lastApplied-1] // index-to-slice position
+		r.stateMachine.Apply(entryToApply)
+	}
 }
 
 func (r *Raft) heartBeatLoop() {
@@ -404,6 +487,7 @@ func (r *Raft) heartBeatLoop() {
 						lastSent := snap.entries[len(snap.entries)-1]
 						r.matchIndex[peerID] = lastSent.Index
 						r.nextIndex[peerID] = lastSent.Index + 1
+						r.tryAdvanceCommitIndex() // check  if this update pushed us to majority
 					}
 					// if snap.entries was empty (pure heartbeat) , nothing changes . already upto date
 				} else {
