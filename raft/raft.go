@@ -151,6 +151,21 @@ func (r *Raft) becomeLeader() {
 		r.nextIndex[peerID] = lastIndex + 1 // optimistic guess: peer needs everything from here on
 		r.matchIndex[peerID] = 0            // don't yet know what's actually replicated
 	}
+
+	// append a no-op entry — establishes this leader's commit frontier
+	// and indirectly commits any stuck previous-term entries (§5.3)
+	newIndex := lastIndex + 1
+	newEntry := wal.Entry{
+		Term:  r.currentTerm,
+		Index: newIndex,
+		Data:  []byte("no-op"),
+	}
+	r.log = append(r.log, newEntry)
+	if err := r.wal.Append(newEntry); err != nil {
+		log.Printf("[node %d] failed to persist no-op entry :%v", r.id, err)
+		return
+	}
+
 	go r.heartBeatLoop()
 	log.Printf("[node %d] BECAME LEADER , term %d", r.id, r.currentTerm)
 }
@@ -284,6 +299,11 @@ func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntries
 		r.currentTerm = args.Term
 		r.votedFor = nil
 	}
+	// this is a legitimate, current-or-newer leader — reset the timer
+	// NOW, regardless of whether the log consistency check below
+	// passes. A rejoining node that's still catching up should not
+	// keep re-electing itself just because its log isn't caught up yet.
+	r.resetElectionTimer()
 
 	// consistency check
 	if args.PrevLogIndex > 0 {
@@ -337,8 +357,23 @@ func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntries
 		}
 	}
 
+	// Update our commit index based on what the leader says is committed, then apply any newly committed address to our own state machine. This is the piece that was missing: followers previously stored entries but never actually applied them locally.
+	if args.LeaderCommit > r.commitIndex {
+		lastNewIndex, _ := r.lastLogIndexAndTerm()
+		if args.LeaderCommit < lastNewIndex {
+			r.commitIndex = args.LeaderCommit
+		} else {
+			r.commitIndex = lastNewIndex
+		}
+	}
+
+	for r.lastApplied < r.commitIndex {
+		r.lastApplied++
+		entryToApply := r.log[r.lastApplied-1]
+		r.stateMachine.Apply(entryToApply)
+	}
+
 	reply := rpc.AppendEntriesReply{Term: r.currentTerm, Success: true}
-	r.resetElectionTimer()
 	return reply
 
 }
@@ -466,9 +501,11 @@ func (r *Raft) heartBeatLoop() {
 					PrevLogIndex: snap.prevIndex,
 					PrevLogTerm:  snap.prevTerm,
 					Entries:      snap.entries,
+					LeaderCommit: r.commitIndex,
 				}
 				reply, err := r.transport.SendAppendEntries(peerAddr, args)
 				if err != nil {
+					log.Printf("[node %d] heartbeat attempt to peer %d (%s) failed: %v", r.id, peerID, peerAddr, err)
 					return
 				}
 				// if a peer's term is ahead of ours , we've been
@@ -493,6 +530,7 @@ func (r *Raft) heartBeatLoop() {
 				} else {
 					if r.nextIndex[peerID] > 1 {
 						r.nextIndex[peerID]--
+						log.Printf("[node %d] peer %d rejected AppendEntries , backing off nextIndex to %d", r.id, peerID, r.nextIndex[peerID])
 					}
 				}
 				r.mu.Unlock()

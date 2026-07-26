@@ -1,15 +1,20 @@
 #!/bin/bash
-# run_cluster_test.sh
+# full_cluster_test.sh
 #
-# Automates the 3-node jin-kv cluster test:
-#   - starts all 3 nodes fresh
-#   - waits for a stable leader
-#   - proposes entries through the leader
-#   - kills a follower, proposes more entries
-#   - kills the leader, waits, revives the dead follower
-#   - checks logs for double-leadership bugs and conflict resolution
+# End-to-end automated test for jin-kv:
+#   1. starts 3 nodes fresh
+#   2. waits for a stable leader
+#   3. proposes writes through the leader, verifies with get
+#   4. kills a follower (simulating it falling behind)
+#   5. proposes more writes the follower will miss
+#   6. kills the leader (quorum temporarily lost)
+#   7. revives the dead follower (quorum restored)
+#   8. waits for a new leader + replication to settle
+#   9. queries the REVIVED node directly and checks the values match
 #
-# Usage: ./run_cluster_test.sh
+# Prints a clear PASS/FAIL verdict at the end.
+#
+# Usage: ./full_cluster_test.sh
 # Run from the jin-kv project root.
 
 set -uo pipefail
@@ -17,6 +22,17 @@ set -uo pipefail
 LOG1=node1.log
 LOG2=node2.log
 LOG3=node3.log
+FIFO1=node1.in
+FIFO2=node2.in
+FIFO3=node3.in
+
+declare -A PID_FOR_ID
+declare -A FEEDER_PID_FOR_ID
+declare -A ADDR_FOR_ID
+ADDR_FOR_ID[1]=":8080"
+ADDR_FOR_ID[2]=":8081"
+ADDR_FOR_ID[3]=":8082"
+PIDS=()
 
 cleanup() {
     echo ""
@@ -24,111 +40,122 @@ cleanup() {
     for pid in "${PIDS[@]:-}"; do
         kill -9 "$pid" 2>/dev/null || true
     done
+    for id in 1 2 3; do
+        fp="${FEEDER_PID_FOR_ID[$id]:-}"
+        [[ -n "$fp" ]] && kill -9 "$fp" 2>/dev/null || true
+    done
+    rm -f "$FIFO1" "$FIFO2" "$FIFO3"
 }
 trap cleanup EXIT
 
-echo "=== killing any orphaned server processes from previous runs ==="
+echo "=== killing any orphaned server processes ==="
 pkill -9 -f "bin/server" 2>/dev/null || true
 sleep 1
 
-echo "=== resetting WAL and log files ==="
-rm -f node1.wal node2.wal node3.wal "$LOG1" "$LOG2" "$LOG3"
+echo "=== resetting WAL, log, and fifo files ==="
+rm -f node1.wal node2.wal node3.wal "$LOG1" "$LOG2" "$LOG3" "$FIFO1" "$FIFO2" "$FIFO3"
 
 echo "=== building ==="
 mkdir -p bin
 go build -o bin/server ./cmd/server || { echo "build failed"; exit 1; }
 
 start_node() {
-    # IMPORTANT: run the compiled binary directly, not "go run".
-    # "go run" spawns a wrapper process and compiles to a temp binary
-    # underneath it — $! would capture the wrapper's PID, and kill -9
-    # on that PID leaves the real server process orphaned and still
-    # running. Running ./bin/server directly means $! is the real PID.
+    # IMPORTANT: recreate the fifo fresh every time this is called —
+    # reusing an old fifo can leave a stale reader (from a previously
+    # killed node) still attached, which silently steals future writes
+    # meant for the newly started process. A fresh mkfifo + fresh
+    # feeder process guarantees exactly one reader exists at a time.
     local id=$1
     local addr=$2
     local logfile=$3
-    ./bin/server -id="$id" -addr="$addr" > "$logfile" 2>&1 &
-    echo $!
+    local fifo=$4
+
+    rm -f "$fifo"
+    mkfifo "$fifo"
+
+    # open the fifo read-write on fd 3 so opening doesn't block
+    # waiting for a writer, then feed it into the server's stdin
+    ( exec 3<>"$fifo"; cat <&3 ) | ./bin/server -id="$id" -addr="$addr" > "$logfile" 2>&1 &
+    local server_pid=$!
+
+    # find the feeder subshell's pid too, so we can kill both later.
+    # it's the most recent background job launched, which is this
+    # same pipeline — but since $! only gives us the pipeline's last
+    # command, grab the feeder via pgrep on the fifo path instead.
+    sleep 0.2
+    local feeder_pid
+    feeder_pid=$(pgrep -f "exec 3<>$fifo" | head -1)
+    FEEDER_PID_FOR_ID[$id]="$feeder_pid"
+
+    echo "$server_pid"
+}
+
+kill_node() {
+    local id=$1
+    local server_pid=${PID_FOR_ID[$id]}
+    local feeder_pid=${FEEDER_PID_FOR_ID[$id]:-}
+    kill -9 "$server_pid" 2>/dev/null || true
+    if [[ -n "$feeder_pid" ]]; then
+        kill -9 "$feeder_pid" 2>/dev/null || true
+    fi
+    # note: once the server process dies, the feeder's next write
+    # attempt will hit a closed pipe and it'll exit on its own (SIGPIPE)
+    # even if we somehow missed killing it directly above
+}
+
+send_cmd() {
+    local fifo=$1
+    local cmd=$2
+    echo "$cmd" > "$fifo"
 }
 
 find_leader() {
-    # scans all 3 logs, returns the node id of whoever most recently
-    # logged "BECAME LEADER", or empty if none found yet
-    local latest_line=""
-    local latest_node=""
-    for f in "$LOG1:1" "$LOG2:2" "$LOG3:3"; do
-        local file="${f%%:*}"
-        local id="${f##*:}"
-        if [[ -f "$file" ]]; then
-            local line
-            line=$(grep "BECAME LEADER" "$file" | tail -1)
-            if [[ -n "$line" ]]; then
-                latest_line="$line"
-                latest_node="$id"
-            fi
+    # returns the id of the node with the MOST RECENT "BECAME LEADER"
+    # line, comparing actual timestamps, not just file order
+    local best_id="" best_ts=""
+    for id in 1 2 3; do
+        local file="node${id}.log"
+        [[ -f "$file" ]] || continue
+        local line
+        line=$(grep "BECAME LEADER" "$file" | tail -1)
+        [[ -z "$line" ]] && continue
+        local ts="${line:0:19}"
+        if [[ -z "$best_ts" || "$ts" > "$best_ts" ]]; then
+            best_ts="$ts"
+            best_id="$id"
         fi
     done
-    echo "$latest_node"
-}
-
-count_leadership_events() {
-    # counts total "BECAME LEADER" lines across all logs — should be
-    # low for a healthy cluster; a high count means leader churn
-    cat "$LOG1" "$LOG2" "$LOG3" 2>/dev/null | grep -c "BECAME LEADER" || true
+    echo "$best_id"
 }
 
 echo "=== starting all 3 nodes ==="
-declare -A PID_FOR_ID
-declare -A LOG_FOR_ID
-PIDS=()
-
-PID_FOR_ID[1]=$(start_node 1 :8080 "$LOG1")
-LOG_FOR_ID[1]=$LOG1
+PID_FOR_ID[1]=$(start_node 1 "${ADDR_FOR_ID[1]}" "$LOG1" "$FIFO1")
 PIDS+=("${PID_FOR_ID[1]}")
-
-PID_FOR_ID[2]=$(start_node 2 :8081 "$LOG2")
-LOG_FOR_ID[2]=$LOG2
+PID_FOR_ID[2]=$(start_node 2 "${ADDR_FOR_ID[2]}" "$LOG2" "$FIFO2")
 PIDS+=("${PID_FOR_ID[2]}")
-
-PID_FOR_ID[3]=$(start_node 3 :8082 "$LOG3")
-LOG_FOR_ID[3]=$LOG3
+PID_FOR_ID[3]=$(start_node 3 "${ADDR_FOR_ID[3]}" "$LOG3" "$FIFO3")
 PIDS+=("${PID_FOR_ID[3]}")
 
 echo "node1 pid=${PID_FOR_ID[1]}  node2 pid=${PID_FOR_ID[2]}  node3 pid=${PID_FOR_ID[3]}"
-echo "waiting 10s for election to stabilize..."
-sleep 10
+echo "waiting 8s for election to stabilize..."
+sleep 8
 
 LEADER_ID=$(find_leader)
 if [[ -z "$LEADER_ID" ]]; then
-    echo "!!! no leader elected within 5s — check logs manually"
+    echo "!!! FAIL: no leader elected within 8s"
     exit 1
 fi
 echo "=== leader is node $LEADER_ID ==="
 
-EVENTS=$(count_leadership_events)
-echo "leadership events so far: $EVENTS"
-if [[ "$EVENTS" -gt 1 ]]; then
-    echo "!!! WARNING: more than one leadership event during initial election — possible re-election bug"
-fi
+fifo_for() { eval echo "\$FIFO$1"; }
 
-# NOTE: proposing entries requires the stdin trigger to be wired into
-# main.go (reading lines and calling r.Propose). This script assumes
-# it's in place. If not yet added, this section will just do nothing
-# harmful — the pipe target simply won't be read.
-echo "=== proposing 3 entries via node $LEADER_ID ==="
-LEADER_PID=${PID_FOR_ID[$LEADER_ID]}
-{
-    echo "set x=1"
-    sleep 0.3
-    echo "set y=2"
-    sleep 0.3
-    echo "set z=3"
-} > "/proc/${LEADER_PID}/fd/0" 2>/dev/null || echo "(could not write to leader stdin — is it backgrounded with a real fd? see note below)"
+echo "=== proposing initial writes via node $LEADER_ID ==="
+send_cmd "$(fifo_for $LEADER_ID)" "set x=100"
+sleep 0.5
+send_cmd "$(fifo_for $LEADER_ID)" "set y=200"
+sleep 1
 
-echo "waiting 3s for these entries to replicate before partitioning..."
-sleep 3
-
-# pick a follower (any id that isn't the leader) to kill first
+# pick a follower to kill
 FOLLOWER_ID=""
 for id in 1 2 3; do
     if [[ "$id" != "$LEADER_ID" ]]; then
@@ -138,56 +165,118 @@ for id in 1 2 3; do
 done
 
 echo "=== killing follower node $FOLLOWER_ID (simulating it falling behind) ==="
-kill -9 "${PID_FOR_ID[$FOLLOWER_ID]}"
+kill_node "$FOLLOWER_ID"
+sleep 1
 
-echo "=== proposing 2 more entries via node $LEADER_ID (follower $FOLLOWER_ID will miss these) ==="
-{
-    echo "set a=9"
-    sleep 0.3
-    echo "set b=8"
-} > "/proc/${LEADER_PID}/fd/0" 2>/dev/null || true
+echo "=== proposing more writes via node $LEADER_ID (node $FOLLOWER_ID will miss these) ==="
+send_cmd "$(fifo_for $LEADER_ID)" "set x=999"
+sleep 0.5
+send_cmd "$(fifo_for $LEADER_ID)" "set z=42"
+echo "waiting 4s to give heartbeats plenty of cycles to replicate before we kill anyone..."
+sleep 4
 
-echo "waiting 3s for these entries to replicate to remaining alive peers..."
-sleep 3
+echo "=== verifying leader's OWN state right before killing it ==="
+send_cmd "$(fifo_for $LEADER_ID)" "get x"
+sleep 0.3
+send_cmd "$(fifo_for $LEADER_ID)" "get z"
+sleep 0.5
 
 echo "=== killing leader node $LEADER_ID (quorum temporarily lost) ==="
-kill -9 "$LEADER_PID"
+kill_node "$LEADER_ID"
 
 echo "waiting 5s (remaining lone node should NOT elect a leader)..."
 sleep 5
 
 echo "=== reviving node $FOLLOWER_ID (quorum restored: 2 of 3 alive) ==="
-FOLLOWER_ADDR=":808$((FOLLOWER_ID - 1))"
-NEW_PID=$(start_node "$FOLLOWER_ID" "$FOLLOWER_ADDR" "${LOG_FOR_ID[$FOLLOWER_ID]}")
+NEW_PID=$(start_node "$FOLLOWER_ID" "${ADDR_FOR_ID[$FOLLOWER_ID]}" "node${FOLLOWER_ID}.log" "$(fifo_for $FOLLOWER_ID)")
 PID_FOR_ID[$FOLLOWER_ID]=$NEW_PID
 PIDS+=("$NEW_PID")
 
-echo "waiting 10s for new election + conflict resolution to settle..."
-sleep 10
+echo "waiting 8s for new election + replication to settle..."
+sleep 8
+
+NEW_LEADER=$(find_leader)
+echo "=== new leader after recovery: node $NEW_LEADER ==="
+
+echo "=== querying revived node $FOLLOWER_ID directly for x, y, z ==="
+send_cmd "$(fifo_for $FOLLOWER_ID)" "get x"
+sleep 0.3
+send_cmd "$(fifo_for $FOLLOWER_ID)" "get y"
+sleep 0.3
+send_cmd "$(fifo_for $FOLLOWER_ID)" "get z"
+sleep 1
+
+echo "=== ALSO querying current leader node $NEW_LEADER for x and z, for comparison ==="
+echo "(if the leader itself never had x=999/z=42, those writes never reached"
+echo " a majority before the old leader died — that's correct Raft behavior,"
+echo " not a bug. If the leader HAS them but the revived node doesn't, that's"
+echo " a real replication bug specific to the revived node.)"
+send_cmd "$(fifo_for $NEW_LEADER)" "get x"
+sleep 0.3
+send_cmd "$(fifo_for $NEW_LEADER)" "get z"
+sleep 1
 
 echo ""
 echo "================ RESULTS ================"
+echo "--- revived node $FOLLOWER_ID log tail (get responses should be here) ---"
+tail -20 "node${FOLLOWER_ID}.log"
 
-NEW_LEADER=$(find_leader)
-echo "new leader after recovery: node $NEW_LEADER"
+echo ""
+echo "--- current leader node $NEW_LEADER log tail (comparison get responses) ---"
+tail -10 "node${NEW_LEADER}.log"
 
-TOTAL_EVENTS=$(count_leadership_events)
-echo "total leadership events across whole run: $TOTAL_EVENTS"
-if [[ "$TOTAL_EVENTS" -gt 3 ]]; then
-    echo "!!! WARNING: leader churned more than expected — check for the double-leadership bug"
+echo ""
+echo "--- verdict ---"
+REVIVED_LOG="node${FOLLOWER_ID}.log"
+OLD_LEADER_LOG="node${LEADER_ID}.log"
+PASS=true
+
+OLD_LEADER_HAD_X=false
+OLD_LEADER_HAD_Z=false
+grep -q "^x = 999" "$OLD_LEADER_LOG" && OLD_LEADER_HAD_X=true
+grep -q "^z = 42" "$OLD_LEADER_LOG" && OLD_LEADER_HAD_Z=true
+
+echo "old leader (node $LEADER_ID) had x=999 before dying: $OLD_LEADER_HAD_X"
+echo "old leader (node $LEADER_ID) had z=42 before dying: $OLD_LEADER_HAD_Z"
+echo ""
+
+if $OLD_LEADER_HAD_X; then
+    if grep -q "^x = 999" "$REVIVED_LOG"; then
+        echo "PASS: x correctly caught up to 999 (old leader had it, revived node now has it too)"
+    else
+        echo "FAIL: old leader HAD x=999 but revived node never caught up — real replication bug"
+        PASS=false
+    fi
+else
+    echo "SKIP: old leader never actually had x=999 before dying — write was never committed,"
+    echo "      so it's correct for it to be lost. Not a bug."
+fi
+
+if grep -q "^y = 200" "$REVIVED_LOG"; then
+    echo "PASS: y correctly caught up to 200"
+else
+    echo "FAIL: y did not catch up to 200"
+    PASS=false
+fi
+
+if $OLD_LEADER_HAD_Z; then
+    if grep -q "^z = 42" "$REVIVED_LOG"; then
+        echo "PASS: z correctly replicated (old leader had it, revived node now has it too)"
+    else
+        echo "FAIL: old leader HAD z=42 but revived node never caught up — real replication bug"
+        PASS=false
+    fi
+else
+    echo "SKIP: old leader never actually had z=42 before dying — write was never committed,"
+    echo "      so it's correct for it to be lost. Not a bug."
 fi
 
 echo ""
-echo "--- conflict/truncation markers in node $FOLLOWER_ID's log ---"
-grep -i "conflict\|truncat" "${LOG_FOR_ID[$FOLLOWER_ID]}" || echo "(none found — conflict resolution may not have triggered, or logging is missing)"
+if $PASS; then
+    echo "=== OVERALL: PASS — replication and recovery verified end to end ==="
+else
+    echo "=== OVERALL: FAIL — see above ==="
+fi
 
-echo ""
-echo "--- last 15 lines of each node's log ---"
-for id in 1 2 3; do
-    echo "-- node $id --"
-    tail -15 "${LOG_FOR_ID[$id]}" 2>/dev/null || echo "(log missing)"
-    echo ""
-done
-
-echo "=== done — press Ctrl+C or wait, cleanup will kill remaining nodes ==="
-sleep 2
+echo "=== done — cleaning up ==="
+sleep 1

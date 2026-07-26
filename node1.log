@@ -1,35 +1,83 @@
-12026/07/18 11:01:09 [node 1] become candidate, term 1
-2026/07/18 11:01:09 [node 1] BECAME LEADER , term 1
-2026/07/18 11:01:23 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:23 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:23 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:23 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:23 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:23 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:23 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:23 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:24 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:24 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:24 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:24 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:24 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:24 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:24 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:24 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:24 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:24 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:25 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:25 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:25 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:25 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:25 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:25 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:25 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:25 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:25 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:25 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:26 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:26 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:26 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:26 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
-2026/07/18 11:01:26 [node 1] heartbeat to localhost:8081 FAILED: dial tcp 127.0.0.1:8081: connect: connection refused
+12026/07/26 19:49:02 [node 1] become candidate, term 1
+2026/07/26 19:49:02 [node 1] vote request from 2 , granted=false
+22026/07/26 19:49:02 [node 1] become candidate, term 2
+2026/07/26 19:49:02 [node 1] BECAME LEADER , term 2
+[debug] recieved line : "set x=100"
+proposed at index 2
+[debug] recieved line : "set y=200"
+proposed at index 3
+2026/07/26 19:49:12 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:12 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:12 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:12 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:12 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:12 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:12 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:12 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:12 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:13 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+[debug] recieved line : "set x=999"
+proposed at index 4
+2026/07/26 19:49:13 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:13 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:13 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:13 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:13 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+[debug] recieved line : "set z=42"
+proposed at index 5
+2026/07/26 19:49:13 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:13 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:13 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:13 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:14 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:14 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:14 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:14 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:14 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:14 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:14 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:14 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:14 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:14 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:15 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:15 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:15 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:15 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:15 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:15 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:15 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:15 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:15 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:15 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:16 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:16 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:16 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:16 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:16 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:16 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:16 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:16 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:16 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:16 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:17 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:17 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:17 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:17 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:17 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:17 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+[debug] recieved line : "get x"
+[debug] parsed key: "x"
+[debug] Get returned : val="100" ok=true
+x = 100
+2026/07/26 19:49:17 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:17 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:17 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+[debug] recieved line : "get z"
+[debug] parsed key: "z"
+[debug] Get returned : val="" ok=false
+z not found
+2026/07/26 19:49:17 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:18 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:18 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:18 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused
+2026/07/26 19:49:18 [node 1] heartbeat attempt to peer 2 (localhost:8081) failed: dial tcp 127.0.0.1:8081: connect: connection refused

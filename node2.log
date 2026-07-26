@@ -1,1 +1,14 @@
-2026/07/18 11:01:31 [node 2] vote request from 3 , granted=true
+12026/07/26 19:49:23 [node 2] become candidate, term 1
+2026/07/26 19:49:23 [node 2] vote request from 3 , granted=true
+[debug] recieved line : "get x"
+[debug] parsed key: "x"
+[debug] Get returned : val="100" ok=true
+x = 100
+[debug] recieved line : "get y"
+[debug] parsed key: "y"
+[debug] Get returned : val="200" ok=true
+y = 200
+[debug] recieved line : "get z"
+[debug] parsed key: "z"
+[debug] Get returned : val="" ok=false
+z not found

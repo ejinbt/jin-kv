@@ -19,6 +19,7 @@ func main() {
 	myAddr := flag.String("addr", ":8080", "this node's address")
 	flag.Parse()
 	peers := map[uint64]string{
+		1: "localhost:8080",
 		2: "localhost:8081",
 		3: "localhost:8082",
 	}

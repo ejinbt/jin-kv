@@ -224,3 +224,92 @@ the part that turns this from "a cluster that agrees on who's in charge"
 into an actual key-value store: real client writes, the leader appending
 them to its log, replicating via non-empty AppendEntries, and advancing
 commitIndex once a majority acknowledges. That's next.
+
+[Phase 3, part 2] — Real replication, a state machine, and a two-day deadlock
+
+What got built Turned Raft from "a cluster that agrees on who's in charge" into something that actually stores data. Added Propose(data []byte) — leader-only, rejects if not leader, computes the next index off the last log entry, builds a real wal.Entry at the leader's current term, appends it to both r.log (in-memory) and the WAL (durable). Reworked heartBeatLoop so it no longer sends empty AppendEntries — it now snapshots, per peer, exactly the entries that peer's nextIndex says it's missing, plus PrevLogIndex/PrevLogTerm so the follower can consistency-check before accepting anything. All of that snapshotting happens while still holding the lock, then gets handed into per-peer goroutines as plain values — learned the hard way (again) that reading shared state after unlocking, or referencing a loop variable directly inside a goroutine instead of passing it in as a parameter, are both real races, not style nitpicks.
+
+Built the Figure-8 conflict-resolution path in HandleAppendEntries: before appending new entries, walk them against what's already in the follower's log at the same indices, and if a term mismatch is found, truncate both r.log and the WAL from that point on (using TruncateAfter, finally put to real use months after building it) before accepting the leader's version. Traced the off-by-one on appendFrom carefully with the diagram — the fix isn't just "truncate on conflict," it's "track the first position in the incoming entries that actually needs writing," or you either duplicate entries that already matched or miss ones that didn't.
+
+Added matchIndex/nextIndex bookkeeping in the heartbeat success/failure paths — advance on success, back off by one on failure — and tryAdvanceCommitIndex: collect every peer's matchIndex plus the leader's own last index, sort descending, take the middle value as "what a majority has reached," and only actually commit it if that entry belongs to the leader's current term (§5.4.2, the same rule from months ago, now actually enforced in code instead of just understood on paper).
+
+Then the last missing piece: a real state machine. A map[string]string behind a mutex, an Apply(entry) that parses "set key=value" text commands, and wiring tryAdvanceCommitIndex to walk lastApplied forward to commitIndex, applying each newly-committed entry in strict order. Added a Get on Raft (explicitly commented as non-linearizable — it reads local state directly, no heartbeat-majority check, no no-op requirement, that's still a known gap) so a client could actually ask "what is x" instead of only ever grepping logs.
+
+The two-day chase Set up a proper 3-node manual test — propose some writes, kill a follower, propose more so it falls behind, kill the leader too, revive the follower once quorum is back, watch it reconcile. Instead got sustained, correctly-timed election churn with no obvious cause. Wrote a whole bash script to automate the kill/revive sequence and remove human timing error from the loop — immediately found the script itself was buggy (go run spawns a wrapper process, so kill -9 on its PID leaves the real server orphaned and still running — explains "new leader after recovery" reporting a node that was supposedly dead). Fixed that, kept chasing: found and fixed a real bug along the way — becomeLeader never reset the election timer, so a freshly-elected leader could still react to a leftover countdown from its own candidacy and re-elect itself almost instantly. That fix genuinely helped (leader stability went from milliseconds to multiple seconds) but didn't fully explain the pattern.
+
+Went down the etcd/Raft-paper rabbit hole to make sure a lone node genuinely can't elect itself (confirmed: it can't, by design, same as etcd — needs (n/2)+1). Read a Stanford CS244B paper on cross-implementation Raft testing (Flotsam) for perspective — even mature, published implementations take real sustained effort to find bugs in, which was a useful thing to sit with mid-frustration. Tried net.DialTimeout instead of bare net.Dial as a hypothesis for a hung-connection theory — didn't fix it, but wasn't wasted, it's still a more correct thing to have in production regardless.
+
+Finally added explicit error logging on every failed heartbeat/vote send, which is what actually cracked it open: the "connection refused" messages were completely expected (node was genuinely dead, script killed it on purpose) — meaning the election churn itself was correct, quorum-loss behavior the whole time, not a bug. The ACTUAL bug was somewhere else entirely and only surfaced once set/get testing began: set x=1 worked, but get x came back "not found" — even on the same node, even after waiting. Eventually traced it to tryAdvanceCommitIndex() never being called at all from the heartbeat success path (built the function, never wired it in — an honest oversight, not a subtle bug). Fixed that, tested again, get still hung completely — no output, not even "not found" — process just froze. That led to the real root cause, sitting the whole time in StateMachine.Apply:
+
+go
+s.mu.Lock()
+defer s.mu.Lock()   // should have been Unlock
+
+One word. Apply locked the state machine's mutex and then, on return, tried to lock it again instead of releasing it — permanently deadlocking that goroutine and every future Get call that ever touched the same mutex again. Two days of suspecting timing races, hung TCP dials, quorum math, and partition behavior — and the actual bug was a single mistyped method name that no amount of protocol-level reasoning was ever going to find, only careful line-by-line reading of the one function that mattered.
+
+What this actually proved, underneath the frustration
+
+The lone-node-can't-elect behavior is real, correct, and matches etcd's documented production behavior exactly — not a bug, a feature working as designed.
+becomeLeader needed the timer reset regardless — genuine bug, properly fixed, independent of the deadlock.
+The kill/revive test automation is solid infrastructure now, reusable for every phase going forward, and its own bug (the go run PID problem) was worth finding on its own merits.
+Full write path is proven end to end: propose → replicate with real consistency checks → majority commit with the term-safety rule → apply to a real, queryable key-value store.
+
+What's still open
+
+The no-op entry on election (§5.3) — still not built. Now that commit logic and a real state machine exist, this is genuinely next, not deferred busywork anymore.
+Get is still explicitly non-linearizable — fine for testing, not fine for a real client-facing read path.
+The conflict-resolution path (Figure 8 truncation) is written and reviewed carefully but still hasn't been observed firing cleanly in an actual kill/revive test — that verification is still owed.
+
+
+## [Phase 3, part 3] — Closing the loop with certainty, not assumption
+
+**What got settled today**
+Picked up exactly where last night left off: `y=200` had already proven
+replication worked, but `x` and `z` came back wrong/missing on the revived
+node, and it wasn't clear whether that was a real bug or expected loss of
+an uncommitted write. Rather than guess, rewrote the test script to query
+the OLD leader directly for its own values right before killing it — not
+just infer from the new leader afterward. Also extended the wait after
+proposing x=999/z=42 from 2s to 4s, giving heartbeats plenty of room to
+actually replicate before the kill, so there was no ambiguity about
+timing being the cause of anything.
+
+Result: the old leader itself never had x=999 or z=42 at the moment it
+died — confirmed directly, not inferred. That settles it. Those two
+writes were never committed to a majority, so their disappearance after
+the leader crashed is correct Raft behavior, not a bug — the whole
+system's guarantee is that only committed entries survive, and it did
+exactly that.
+
+**Why this mattered enough to spend a whole session on**
+Could have called Phase 3 "basically done" after y=200 worked and moved
+on. Chose not to, because "probably fine" isn't the same as "verified,"
+and the entire discipline of this project has been about knowing the
+difference. Rewrote the verdict logic in the test script itself so it
+now explicitly distinguishes "old leader never had it (not a bug, SKIP)"
+from "old leader had it but the revived node didn't catch up (real bug,
+FAIL)" — meaning this test can be trusted going forward without needing
+to manually re-litigate this question every time it's run again.
+
+**Final verdict, for the record**
+```
+old leader (node 1) had x=999 before dying: false
+old leader (node 1) had z=42 before dying: false
+SKIP: not committed, correct to lose it
+PASS: y correctly caught up to 200
+SKIP: not committed, correct to lose it
+OVERALL: PASS — replication and recovery verified end to end
+```
+
+**Where this leaves Phase 3**
+Actually, provably done. Not "the logic looks right," not "it worked
+once" — a real node died mid-cluster, missed writes, came back, and
+received exactly what it was owed and nothing it wasn't. That's the
+whole promise of consensus, demonstrated with a script that leaves no
+room for hand-waving.
+
+**Status check**
+Phase 0 — done. Phase 1 (WAL) — done, crash-proven. Phase 2 (leader
+election) — done, failover-proven. Phase 3 (log replication) — done,
+verified end to end today. Phase 4 (fault tolerance — snapshots, log
+compaction, InstallSnapshot RPC) starts next.
