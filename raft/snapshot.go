@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"os"
 )
 
 type Snapshot struct {
@@ -90,4 +91,29 @@ func DecodeSnapshot(data []byte) (*Snapshot, error) {
 
 	}
 	return &s, nil
+}
+
+// SaveSnapshot writes a snapshot to disk at the given path
+
+func SaveSnapshot(path string, s *Snapshot) error {
+	encoded, err := s.Encode()
+	if err != nil {
+		return fmt.Errorf("failed to encode : %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 06044)
+
+	if err != nil {
+
+		return fmt.Errorf("failed to open snapshot file :%w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write(encoded); err != nil {
+		return fmt.Errorf("failed to write snapshot : %w", err)
+	}
+
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("failed to fsync snapshot : %w", err)
+	}
+	return nil
 }
