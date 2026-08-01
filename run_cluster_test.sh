@@ -75,7 +75,7 @@ start_node() {
 
     # open the fifo read-write on fd 3 so opening doesn't block
     # waiting for a writer, then feed it into the server's stdin
-    ( exec 3<>"$fifo"; cat <&3 ) | ./bin/server -id="$id" -addr="$addr" > "$logfile" 2>&1 &
+    ./bin/server -id="$id" -addr="$addr" >> "$logfile" 2>&1 &
     local server_pid=$!
 
     # find the feeder subshell's pid too, so we can kill both later.
@@ -89,6 +89,8 @@ start_node() {
 
     echo "$server_pid"
 }
+
+
 
 kill_node() {
     local id=$1
@@ -128,6 +130,20 @@ find_leader() {
     echo "$best_id"
 }
 
+wait_for_port() {
+    local port=$1
+    local tries=0
+    while ! (echo > "/dev/tcp/127.0.0.1/$port") 2>/dev/null; do
+        sleep 0.2
+        tries=$((tries + 1))
+        if [[ $tries -gt 25 ]]; then
+            echo "!!! timed out waiting for port $port to come up"
+            return 1
+        fi
+    done
+    return 0
+}
+
 echo "=== starting all 3 nodes ==="
 PID_FOR_ID[1]=$(start_node 1 "${ADDR_FOR_ID[1]}" "$LOG1" "$FIFO1")
 PIDS+=("${PID_FOR_ID[1]}")
@@ -137,6 +153,12 @@ PID_FOR_ID[3]=$(start_node 3 "${ADDR_FOR_ID[3]}" "$LOG3" "$FIFO3")
 PIDS+=("${PID_FOR_ID[3]}")
 
 echo "node1 pid=${PID_FOR_ID[1]}  node2 pid=${PID_FOR_ID[2]}  node3 pid=${PID_FOR_ID[3]}"
+echo "waiting for all 3 ports to actually come up..."
+wait_for_port 8080
+wait_for_port 8081
+wait_for_port 8082
+echo "all 3 ports confirmed up"
+
 echo "waiting 8s for election to stabilize..."
 sleep 8
 
@@ -153,6 +175,17 @@ echo "=== proposing initial writes via node $LEADER_ID ==="
 send_cmd "$(fifo_for $LEADER_ID)" "set x=100"
 sleep 0.5
 send_cmd "$(fifo_for $LEADER_ID)" "set y=200"
+sleep 2
+
+echo "=== SANITY CHECK: querying every node for x and y before any kills happen ==="
+echo "(if these fail even here, the bug is in basic replication itself,"
+echo " not in anything related to the kill/revive/compaction scenario)"
+for id in 1 2 3; do
+    send_cmd "$(fifo_for $id)" "get x"
+    sleep 0.3
+    send_cmd "$(fifo_for $id)" "get y"
+    sleep 0.3
+done
 sleep 1
 
 # pick a follower to kill
@@ -192,6 +225,11 @@ NEW_PID=$(start_node "$FOLLOWER_ID" "${ADDR_FOR_ID[$FOLLOWER_ID]}" "node${FOLLOW
 PID_FOR_ID[$FOLLOWER_ID]=$NEW_PID
 PIDS+=("$NEW_PID")
 
+REVIVED_PORT="${ADDR_FOR_ID[$FOLLOWER_ID]#:}"
+echo "waiting for revived node's port ($REVIVED_PORT) to actually come up..."
+wait_for_port "$REVIVED_PORT"
+echo "revived node's port confirmed up"
+
 echo "waiting 8s for new election + replication to settle..."
 sleep 8
 
@@ -215,6 +253,14 @@ send_cmd "$(fifo_for $NEW_LEADER)" "get x"
 sleep 0.3
 send_cmd "$(fifo_for $NEW_LEADER)" "get z"
 sleep 1
+
+echo ""
+echo "================ EARLY SANITY CHECK (before any kills) ================"
+for id in 1 2 3; do
+    echo "--- node $id get x/y responses (grepped from full log) ---"
+    grep -A 2 '"get x"\|"get y"' "node${id}.log" | head -12
+    echo ""
+done
 
 echo ""
 echo "================ RESULTS ================"
@@ -258,7 +304,7 @@ else
     echo "FAIL: y did not catch up to 200"
     PASS=false
 fi
-
+# is this how we write comments in bash script ?
 if $OLD_LEADER_HAD_Z; then
     if grep -q "^z = 42" "$REVIVED_LOG"; then
         echo "PASS: z correctly replicated (old leader had it, revived node now has it too)"

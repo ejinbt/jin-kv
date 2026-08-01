@@ -100,7 +100,7 @@ func SaveSnapshot(path string, s *Snapshot) error {
 	if err != nil {
 		return fmt.Errorf("failed to encode : %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 06044)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 
 	if err != nil {
 
@@ -116,4 +116,21 @@ func SaveSnapshot(path string, s *Snapshot) error {
 		return fmt.Errorf("failed to fsync snapshot : %w", err)
 	}
 	return nil
+}
+
+func LoadSnapshot(path string) (*Snapshot, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // no snapshot yet
+		}
+		return nil, fmt.Errorf("failed to read snapshot file :%w", err)
+	}
+
+	s, err := DecodeSnapshot(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode snapshot : %w", err)
+	}
+
+	return s, nil
 }

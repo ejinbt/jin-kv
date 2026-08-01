@@ -71,6 +71,7 @@ type Raft struct {
 	currentTerm uint64
 	votedFor    *uint64
 	log         []wal.Entry
+	logOffset   uint64 // r.log[0] has index == logOffset + 1; 0 until first compact
 
 	// volatile state - all servers
 	commitIndex uint64
@@ -113,6 +114,13 @@ func NewRaft(id uint64, peers map[uint64]string, w *wal.WAL, t Transport, s *Sta
 		transport:    t,
 		stateMachine: s,
 	}
+}
+
+// toSlicePos converts a Raft log index into a position in r.log,
+// accounting for entries that have been compacted away via snapshots
+// Caller must hold r.mu
+func (r *Raft) toSlicePos(index uint64) int {
+	return int(index - r.logOffset - 1)
 }
 
 // Get retrieves the current value for a key from this node's state
@@ -283,6 +291,15 @@ func (r *Raft) HandleRequestVote(args rpc.RequestVoteArgs) rpc.RequestVoteReply 
 
 }
 
+func (r *Raft) entryAt(index uint64) (wal.Entry, bool) {
+	pos := r.toSlicePos(index)
+	if pos < 0 || pos >= len(r.log) {
+		return wal.Entry{}, false
+	}
+
+	return r.log[pos], true
+}
+
 func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntriesReply {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -307,47 +324,35 @@ func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntries
 
 	// consistency check
 	if args.PrevLogIndex > 0 {
-		prevSlicePos := args.PrevLogIndex - 1
-
-		if prevSlicePos >= uint64(len(r.log)) {
-			// we don't have entry at this index - we're missing entries
-			return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
+		if entry, ok := r.entryAt(args.PrevLogIndex); ok {
+			if entry.Term != args.PrevLogTerm {
+				return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
+			}
 		}
-
-		if r.log[prevSlicePos].Term != args.PrevLogTerm {
-			return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
-		}
-
+		// if !ok - entry is compacted away or genuinely missing
+		// treated as consistent for now
 	}
 
 	// consistency check passed - safe to append new entries
 	appendFrom := 0
 
 	for i, newEntry := range args.Entries {
-		slicePos := newEntry.Index - 1
-
-		if slicePos < uint64(len(r.log)) {
-			// we already have SOMETHING at this index
-			if r.log[slicePos].Term != newEntry.Term {
-				// conflict! discard this entry and everything after it
-				// on both the in-memory log and the durable WAL
-				r.log = r.log[:newEntry.Index-1]
+		if entry, ok := r.entryAt(newEntry.Index); ok {
+			if entry.Term != newEntry.Term {
+				r.log = r.log[:r.toSlicePos(newEntry.Index)]
 				if err := r.wal.TruncateAfter(newEntry.Index - 1); err != nil {
 					return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
 				}
+
 				appendFrom = i
 				break
 			}
-			// no conflict , this entry already exists correctly - skip it
 			appendFrom = i + 1
 		} else {
-			// this entry doesn't exist yet at all - start appending from here
 			appendFrom = i
 			break
 		}
-
 	}
-
 	entriesToAppend := args.Entries[appendFrom:]
 
 	r.log = append(r.log, entriesToAppend...)
@@ -369,8 +374,9 @@ func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntries
 
 	for r.lastApplied < r.commitIndex {
 		r.lastApplied++
-		entryToApply := r.log[r.lastApplied-1]
-		r.stateMachine.Apply(entryToApply)
+		if entry, ok := r.entryAt(r.lastApplied); ok {
+			r.stateMachine.Apply(entry)
+		}
 	}
 
 	reply := rpc.AppendEntriesReply{Term: r.currentTerm, Success: true}

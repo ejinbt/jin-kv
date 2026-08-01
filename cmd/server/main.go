@@ -24,7 +24,7 @@ func main() {
 		3: "localhost:8082",
 	}
 
-	w, err := wal.Open("node1.wal")
+	w, err := wal.Open(fmt.Sprintf("node%d.wal", *myID))
 	if err != nil {
 		log.Fatalf("failed to open WAL: %v", err)
 	}
