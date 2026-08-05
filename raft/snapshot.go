@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"os"
 )
 
@@ -146,4 +147,42 @@ func (s *StateMachine) Snapshot() map[string]string {
 	}
 
 	return copy
+}
+
+// maybeSnapshot checks whether enough entires have been applied since
+// the last snapshot to justify taking a new one , and if so , does the
+// full sequence : capture state , save to disk , compact both the
+// in-memory log and the WAL
+// Caller must hold r.mu
+func (r *Raft) maybeSnapshot() {
+	const snapshotThreshold = 10 // low for testing; real systems use thousand
+
+	if r.lastApplied-r.lastSnapshotIndex >= snapshotThreshold {
+		// threashold reached
+		contents := r.stateMachine.Snapshot()
+		entry, ok := r.entryAt(r.lastApplied)
+		if !ok {
+			return // shouldn't normally happen , but guard against it
+		}
+
+		snapshot := Snapshot{
+			LastIncludedTerm:  entry.Term,
+			LastIncludedIndex: r.lastApplied,
+			Data:              contents,
+		}
+		snapshotPath := fmt.Sprintf("node%d.snapshot", r.id)
+
+		if err := SaveSnapshot(snapshotPath, &snapshot); err != nil {
+			log.Printf("[node %d] failed to save snapshot : %v", r.id, err)
+			return
+		}
+
+		r.compactLog(r.lastApplied)
+
+		if err := r.wal.CompactWAL(r.lastApplied); err != nil {
+			return
+		}
+
+		r.lastSnapshotIndex = r.lastApplied
+	}
 }

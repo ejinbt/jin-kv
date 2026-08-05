@@ -216,7 +216,7 @@ func (w *WAL) TruncateAfter(index uint64) error {
 // before compactIndex , since they're now captured in a snapshot
 // Uses a temp file , then rename pattern so a crash mid-compaction
 // never corrupts or loses the orginal WAL
-func (w *WAL) compactWAL(compactIndex uint64) error {
+func (w *WAL) CompactWAL(compactIndex uint64) error {
 	entries, err := w.ReadAll()
 	if err != nil {
 		return fmt.Errorf("failed to read entries for compaction : %w", err)
@@ -246,12 +246,11 @@ func (w *WAL) compactWAL(compactIndex uint64) error {
 	if err := tempWAL.Close(); err != nil {
 		return fmt.Errorf("failed to close temp WAL:%w", err)
 	}
-	w.file.Close()
 	// atomically replace the orginal file with the compacted one
 	if err := os.Rename(tempPath, path); err != nil {
 		return fmt.Errorf("failed to rename compacted WAL into place: %w", err)
 	}
-
+	w.file.Close()
 	// the old w.file handle now points at a stale/unlinked file
 	// reopen it against the renamed file so future Append calls
 	// write to the correct, current file

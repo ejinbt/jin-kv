@@ -82,14 +82,15 @@ type Raft struct {
 	matchIndex map[uint64]uint64
 
 	// node metadata
-	id            uint64
-	state         State
-	peers         map[uint64]string
-	mu            sync.Mutex
-	wal           *wal.WAL
-	electionTimer *time.Timer
-	transport     Transport
-	stateMachine  *StateMachine
+	id                uint64
+	state             State
+	peers             map[uint64]string
+	mu                sync.Mutex
+	wal               *wal.WAL
+	electionTimer     *time.Timer
+	transport         Transport
+	stateMachine      *StateMachine
+	lastSnapshotIndex uint64 // starts at 0
 }
 
 type peerData struct {
@@ -548,7 +549,7 @@ func (r *Raft) heartBeatLoop() {
 // compactLog discards log entries up through lastIncludedIndex
 // since they're now caputred in a snapshot instead
 // Caller must hold r.mu
-func (r *Raft) compcatLog(lastIncludedIndex uint64) {
+func (r *Raft) compactLog(lastIncludedIndex uint64) {
 	if lastIncludedIndex <= r.logOffset {
 		return // already compacted at least this far
 	}
