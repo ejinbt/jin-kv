@@ -313,3 +313,87 @@ Phase 0 — done. Phase 1 (WAL) — done, crash-proven. Phase 2 (leader
 election) — done, failover-proven. Phase 3 (log replication) — done,
 verified end to end today. Phase 4 (fault tolerance — snapshots, log
 compaction, InstallSnapshot RPC) starts next.
+
+
+## [Phase 4, part 1] — Offset refactor, and the bug that was there the whole time
+
+**What got built**
+Started the real Phase 4 work: added `logOffset` to the Raft struct so
+`r.log` can eventually have its early entries compacted away without
+breaking index math — checked this design against etcd's actual source
+first (confirmed: etcd's raftLog uses the identical pattern, an `offset`
+field on `unstable`, plus a `Compact(compactIndex)` that refuses to
+compact past what's been applied). Added `toSlicePos` as the raw
+conversion, then wrapped it in a cleaner `entryAt(index) (wal.Entry, bool)`
+helper so call sites don't have to repeat "check for negative, then
+convert" boilerplate every time — negative meaning "already compacted,
+treat as consistent" rather than "missing." Rewired the consistency check,
+the conflict-detection loop, and the apply loop in HandleAppendEntries to
+go through entryAt instead of raw `entry.Index - 1` math.
+
+**Then everything broke, and it took most of the night to find out why**
+Reran the full kill/revive test after the refactor and y stopped
+replicating — even x, the very first write, stopped showing up on node 2.
+Since logOffset is 0 the whole test (no compaction ever actually triggers
+yet), the refactor should have been a complete no-op behaviorally. Spent
+a long time proving that mathematically and it kept checking out, which
+was the first real sign this probably wasn't the refactor's fault at all.
+
+Built a proper sanity check into the test script — query all three nodes
+for x and y immediately after the very first proposal, before any kill
+happens at all. Node 1 and node 3 had the values. Node 2 didn't, even
+though nothing had touched it yet. That reframed the whole night: not a
+compaction bug, not an offset bug — something wrong with node 2
+specifically, from the very start of every run.
+
+Chased it through: confirmed node 1 was genuinely failing to reach node 2
+("connection refused") even after adding an active port-wait to the
+script instead of trusting a fixed sleep. Ruled out startup timing
+completely — the failures kept happening well past the point the port was
+confirmed open. Found the log file itself was being truncated (`>`
+instead of `>>`) every time a node restarted, which was hiding the actual
+evidence — switched it to append so nothing gets silently erased anymore,
+a good permanent fix for the test harness regardless of what was causing
+the real bug.
+
+**The actual root cause**
+`main.go` had `wal.Open("node1.wal")` — hardcoded, ignoring the `-id`
+flag entirely. Every node, regardless of which ID it was started with,
+was opening and writing to the exact same file on disk. Three unrelated
+processes silently corrupting each other's WAL data the entire time.
+This has apparently been there since early Phase 2 — invisible until a
+test rigorous enough to check "does THIS specific node have THIS specific
+durable value" finally exposed it, because in-memory election logic
+(separate per-process) always looked completely correct on its own.
+Fixed with one line: `wal.Open(fmt.Sprintf("node%d.wal", *myID))`.
+
+Verified manually right after the fix, no scripting: set x=100 on node 1,
+got x=100 back from node 3 independently. Real, clean, correct.
+
+**The honest gut-punch of the night**
+Every multi-node election, failover, and vote-counting test since Phase 2
+has genuinely worked correctly — that logic was never in question and
+never touched the WAL. But every test that depended on independently
+durable, per-node data was quietly running on top of three processes
+sharing one file the entire time. It's a strange thing to sit with: the
+consensus logic was right the whole time, and the storage layer
+underneath it was silently wrong the whole time too, and neither one
+told on the other until tonight.
+
+**What this says about the debugging discipline**
+This is the second time in this project a single-character or single-line
+typo (Lock vs Unlock, hardcoded filename) cost multiple sessions of
+believing something conceptually deep and hard was broken, when it was
+actually something small and structural. Worth remembering going
+forward: when a distributed-systems-shaped symptom shows up, check the
+boring plumbing (file paths, variable defaults, what's actually shared
+vs isolated) before assuming the algorithm itself is wrong.
+
+**Where this leaves things**
+The offset/entryAt refactor is done, reviewed, and — once retested on top
+of the actual fix — very likely correct and was never the problem.
+Phase 4's real remaining work: wire up an actual snapshot-triggering
+policy (snapshot every N entries, matching etcd's --snapshot-count idea),
+call compactLog once a snapshot is saved, and eventually build
+InstallSnapshot for followers that fall too far behind to catch up via
+normal replication.

@@ -545,6 +545,26 @@ func (r *Raft) heartBeatLoop() {
 	}
 }
 
+// compactLog discards log entries up through lastIncludedIndex
+// since they're now caputred in a snapshot instead
+// Caller must hold r.mu
+func (r *Raft) compcatLog(lastIncludedIndex uint64) {
+	if lastIncludedIndex <= r.logOffset {
+		return // already compacted at least this far
+	}
+	if lastIncludedIndex > r.lastApplied {
+		// safety rule from etcd: never compact past what's actually
+		// been applied to the state machine
+		return
+	}
+	keepFrom := r.toSlicePos(lastIncludedIndex) + 1
+	if keepFrom < 0 || keepFrom > len(r.log) {
+		return // safety guard
+	}
+	r.log = r.log[keepFrom:]
+	r.logOffset = lastIncludedIndex
+}
+
 // Propose accepts a new command from a client. Only valid if this node
 // is currently the leader. Returns the index the entry was assigned to
 func (r *Raft) Propose(data []byte) (uint64, error) {

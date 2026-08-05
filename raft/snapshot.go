@@ -134,3 +134,16 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 
 	return s, nil
 }
+
+// Snapshot returns a safe copy of the state machine's current contents
+func (s *StateMachine) Snapshot() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	copy := make(map[string]string, len(s.data))
+	for k, v := range s.data {
+		copy[k] = v
+	}
+
+	return copy
+}
