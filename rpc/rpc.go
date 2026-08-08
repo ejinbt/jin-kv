@@ -3,6 +3,7 @@ package rpc
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 
 	"github.com/ejinbt/jinkv/wal"
 )
@@ -162,6 +163,100 @@ func EncodeAppendEntriesReply(reply AppendEntriesReply) ([]byte, error) {
 func DecodeAppendEntriesReply(data []byte) (AppendEntriesReply, error) {
 	var reply AppendEntriesReply
 	reader := bytes.NewReader(data)
+	if err := binary.Read(reader, binary.BigEndian, &reply); err != nil {
+		return AppendEntriesReply{}, err
+	}
+	return reply, nil
+}
+
+type InstallSnapshotArgs struct {
+	Term              uint64
+	LeaderID          uint64
+	LastIncludedIndex uint64
+	LastIncludedTerm  uint64
+	Data              []byte // the encoded snapshot itself
+}
+
+type InstallSnapshotReply struct {
+	Term uint64
+}
+
+func EncodeInstallSnapshotArgs(args InstallSnapshotArgs) ([]byte, error) {
+	var buf bytes.Buffer
+
+	// fixed-size fields first
+	if err := binary.Write(&buf, binary.BigEndian, args.Term); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Write(&buf, binary.BigEndian, args.LeaderID); err != nil {
+		return nil, err
+	}
+
+	if err := binary.Write(&buf, binary.BigEndian, args.LastIncludedIndex); err != nil {
+		return nil, err
+	}
+	if err := binary.Write(&buf, binary.BigEndian, args.LastIncludedTerm); err != nil {
+		return nil, err
+	}
+
+	// Data is already a complete blob of bytes - write its length once
+	// then the whole blob in a single write , no loop needed
+	if err := binary.Write(&buf, binary.BigEndian, uint32(len(args.Data))); err != nil {
+		return nil, err
+	}
+
+	buf.Write(args.Data)
+
+	return buf.Bytes(), nil
+}
+
+func DecodeInstallSnapshotArgs(data []byte) (InstallSnapshotArgs, error) {
+	var args InstallSnapshotArgs
+	reader := bytes.NewReader(data)
+
+	if err := binary.Read(reader, binary.BigEndian, &args.Term); err != nil {
+		return InstallSnapshotArgs{}, err
+	}
+	if err := binary.Read(reader, binary.BigEndian, &args.LeaderID); err != nil {
+		return InstallSnapshotArgs{}, err
+	}
+	if err := binary.Read(reader, binary.BigEndian, &args.LastIncludedIndex); err != nil {
+		return InstallSnapshotArgs{}, err
+	}
+	if err := binary.Read(reader, binary.BigEndian, &args.LastIncludedTerm); err != nil {
+		return InstallSnapshotArgs{}, err
+	}
+
+	var dataLen uint32
+	if err := binary.Read(reader, binary.BigEndian, &dataLen); err != nil {
+		return InstallSnapshotArgs{}, err
+	}
+
+	dataBytes := make([]byte, dataLen)
+
+	if _, err := io.ReadFull(reader, dataBytes); err != nil {
+
+		return InstallSnapshotArgs{}, err
+	}
+
+	args.Data = dataBytes
+
+	return args, nil
+}
+
+func EncodeInstallSnapshotReply(reply InstallSnapshotReply) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.BigEndian, reply); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func DecodeInstallSnapshotReply(data []byte) (InstallSnapshotReply, error) {
+	var reply InstallSnapshotReply
+	reader := bytes.NewReader(data)
+
 	if err := binary.Read(reader, binary.BigEndian, &reply); err != nil {
 		return AppendEntriesReply{}, err
 	}

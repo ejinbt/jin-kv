@@ -155,7 +155,7 @@ func (s *StateMachine) Snapshot() map[string]string {
 // in-memory log and the WAL
 // Caller must hold r.mu
 func (r *Raft) maybeSnapshot() {
-	const snapshotThreshold = 10 // low for testing; real systems use thousand
+	const snapshotThreshold = 3 // low for testing; real systems use thousand
 
 	if r.lastApplied-r.lastSnapshotIndex >= snapshotThreshold {
 		// threashold reached

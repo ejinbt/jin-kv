@@ -379,6 +379,7 @@ func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntries
 			r.stateMachine.Apply(entry)
 		}
 	}
+	r.maybeSnapshot()
 
 	reply := rpc.AppendEntriesReply{Term: r.currentTerm, Success: true}
 	return reply
@@ -437,12 +438,10 @@ func (r *Raft) tryAdvanceCommitIndex() {
 		return // nothing to commit yet
 	}
 
-	entrySlicePos := majorityIndex - 1
-	if entrySlicePos >= uint64(len(r.log)) {
-		return // shouldn't happen , but guard against out-of-range
+	entryAtMajority, ok := r.entryAt(majorityIndex)
+	if !ok {
+		return // guard against it
 	}
-
-	entryAtMajority := r.log[entrySlicePos]
 
 	if entryAtMajority.Term != r.currentTerm {
 		// this entry is from a PREVIOUS term - cannot commit it directly
@@ -455,9 +454,12 @@ func (r *Raft) tryAdvanceCommitIndex() {
 	// apply newly-commited entries to the state machine
 	for r.lastApplied < r.commitIndex {
 		r.lastApplied++
-		entryToApply := r.log[r.lastApplied-1] // index-to-slice position
-		r.stateMachine.Apply(entryToApply)
+		if entry, ok := r.entryAt(r.lastApplied); ok {
+			r.stateMachine.Apply(entry)
+		}
 	}
+
+	r.maybeSnapshot()
 }
 
 func (r *Raft) heartBeatLoop() {
@@ -481,11 +483,16 @@ func (r *Raft) heartBeatLoop() {
 			prevIndex := r.nextIndex[peerID] - 1
 			var prevTerm uint64
 			if prevIndex > 0 {
-				prevTerm = r.log[prevIndex-1].Term
+				if entry, ok := r.entryAt(prevIndex); ok {
+					prevTerm = entry.Term
+				}
 			}
 
+			// if !ok - already compacted away , prevTerm stays 0
+			// which is acceptable for now (same simplification as the consistency check elsewhere)
+
 			peerSnapshots[peerID] = peerData{
-				entries:   r.log[r.nextIndex[peerID]-1:],
+				entries:   r.log[r.toSlicePos(r.nextIndex[peerID]):],
 				prevIndex: prevIndex,
 				prevTerm:  prevTerm,
 			}
@@ -512,7 +519,6 @@ func (r *Raft) heartBeatLoop() {
 				}
 				reply, err := r.transport.SendAppendEntries(peerAddr, args)
 				if err != nil {
-					log.Printf("[node %d] heartbeat attempt to peer %d (%s) failed: %v", r.id, peerID, peerAddr, err)
 					return
 				}
 				// if a peer's term is ahead of ours , we've been
@@ -537,7 +543,6 @@ func (r *Raft) heartBeatLoop() {
 				} else {
 					if r.nextIndex[peerID] > 1 {
 						r.nextIndex[peerID]--
-						log.Printf("[node %d] peer %d rejected AppendEntries , backing off nextIndex to %d", r.id, peerID, r.nextIndex[peerID])
 					}
 				}
 				r.mu.Unlock()
