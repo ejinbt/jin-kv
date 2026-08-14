@@ -16,10 +16,12 @@ type MessageType byte
 type Client struct{}
 
 const (
-	MsgRequestVoteArgs    MessageType = 1
-	MsgRequestVoteReply   MessageType = 2
-	MsgAppendEntriesArgs  MessageType = 3
-	MsgAppendEntriesReply MessageType = 4
+	MsgRequestVoteArgs      MessageType = 1
+	MsgRequestVoteReply     MessageType = 2
+	MsgAppendEntriesArgs    MessageType = 3
+	MsgAppendEntriesReply   MessageType = 4
+	MsgInstallSnapshotArgs  MessageType = 5
+	MsgInstallSnapshotReply MessageType = 6
 )
 
 func NewClient() *Client {
@@ -115,6 +117,36 @@ func (c *Client) SendAppendEntries(peerAddr string, args rpc.AppendEntriesArgs) 
 	}
 
 	return rpc.DecodeAppendEntriesReply(payload)
+}
+
+func (c *Client) SendInstallSnapshot(peerAddr string, args rpc.InstallSnapshotArgs) (rpc.InstallSnapshotReply, error) {
+	// dial, encode args, writeMessage, readMessage, decode reply
+	conn, err := net.DialTimeout("tcp", peerAddr, 200*time.Millisecond)
+	if err != nil {
+		return rpc.InstallSnapshotReply{}, err
+	}
+
+	defer conn.Close()
+
+	encodedArgs, err := rpc.EncodeInstallSnapshotArgs(args)
+	if err != nil {
+		return rpc.InstallSnapshotReply{}, fmt.Errorf("failed to encode args : %w", err)
+	}
+
+	if err := writeMessage(conn, MsgInstallSnapshotArgs, encodedArgs); err != nil {
+		return rpc.InstallSnapshotReply{}, err
+	}
+
+	msgType, payload, err := readMessage(conn)
+	if err != nil {
+		return rpc.InstallSnapshotReply{}, err
+	}
+
+	if msgType != MsgInstallSnapshotReply {
+		return rpc.InstallSnapshotReply{}, fmt.Errorf("unexpected message type: %d", msgType)
+	}
+
+	return rpc.DecodeInstallSnapshotReply(payload)
 }
 
 // StartServer begins listening for incoming RPCs and dispatches them to r (raft)

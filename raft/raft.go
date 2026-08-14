@@ -596,6 +596,54 @@ func (r *Raft) Propose(data []byte) (uint64, error) {
 	return newIndex, nil
 }
 
+// Restore replaces the state machine's entire contents with the
+// given data - used when installing a snapshot from the leader.
+func (s *StateMachine) Restore(data map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data = data
+}
+
+func (r *Raft) HandleInstallSnapshot(args rpc.InstallSnapshotArgs) rpc.InstallSnapshotReply {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if args.Term < r.currentTerm {
+		return rpc.InstallSnapshotReply{Term: r.currentTerm}
+	}
+
+	if args.Term >= r.currentTerm && r.state != Follower {
+		r.state = Follower
+	}
+
+	if args.Term > r.currentTerm {
+		r.currentTerm = args.Term
+		r.votedFor = nil
+
+	}
+
+	r.resetElectionTimer()
+
+	snapshot, err := DecodeSnapshot(args.Data)
+	if err != nil {
+		return rpc.InstallSnapshotReply{Term: r.currentTerm}
+	}
+	snapshotPath := fmt.Sprintf("node%d.snapshot", r.id)
+	if err := SaveSnapshot(snapshotPath, snapshot); err != nil {
+		return rpc.InstallSnapshotReply{Term: r.currentTerm}
+	}
+
+	r.stateMachine.Restore(snapshot.Data)
+	r.logOffset = snapshot.LastIncludedIndex
+	r.lastApplied = snapshot.LastIncludedIndex
+	r.commitIndex = snapshot.LastIncludedIndex
+
+	r.log = nil
+
+	return rpc.InstallSnapshotReply{Term: r.currentTerm}
+
+}
+
 func (r *Raft) Start() {
 	// this is where timer begins and the election watching goroutine launches
 	r.resetElectionTimer()

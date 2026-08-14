@@ -258,7 +258,7 @@ func DecodeInstallSnapshotReply(data []byte) (InstallSnapshotReply, error) {
 	reader := bytes.NewReader(data)
 
 	if err := binary.Read(reader, binary.BigEndian, &reply); err != nil {
-		return AppendEntriesReply{}, err
+		return InstallSnapshotReply{}, err
 	}
 	return reply, nil
 }
