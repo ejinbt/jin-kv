@@ -202,6 +202,19 @@ func handleConnection(conn net.Conn, r *raft.Raft) {
 		}
 
 		writeMessage(conn, MsgAppendEntriesReply, encodedReply)
+	case MsgInstallSnapshotArgs:
+		args, err := rpc.DecodeInstallSnapshotArgs(payload)
+		if err != nil {
+			return
+		}
+		reply := r.HandleInstallSnapshot(args)
+		encodedReply, err := rpc.EncodeInstallSnapshotReply(reply)
+		if err != nil {
+			return
+		}
+
+		writeMessage(conn, MsgInstallSnapshotReply, encodedReply)
+
 	default:
 		// unknown message type , drop the connection
 		return
