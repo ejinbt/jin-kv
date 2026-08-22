@@ -1,23 +1,8 @@
-12026/08/22 14:15:22 [node 1] become candidate, term 1
-22026/08/22 14:15:22 [node 1] become candidate, term 2
-2026/08/22 14:15:22 [node 1] BECAME LEADER , term 2
-[debug] recieved line : "set k1=v1"
+12026/08/22 16:35:17 [node 1] become candidate, term 1
+2026/08/22 16:35:17 [node 1] BECAME LEADER , term 1
+[debug] recieved line : "set x=100"
 proposed at index 2
-[debug] recieved line : "set k2=v2"
-proposed at index 3
-[debug] recieved line : "set k3=v3"
-proposed at index 4
-[debug] recieved line : "set k4=v4"
-proposed at index 5
-[debug] recieved line : "set k5=v5"
-proposed at index 6
-[debug] recieved line : "set k6=v6"
-proposed at index 7
-[debug] recieved line : "set k7=v7"
-proposed at index 8
-[debug] recieved line : "set k8=v8"
-proposed at index 9
-2026/08/22 14:15:38 [node 1] vote request from 3 , granted=true
-2026/08/22 14:15:39 [node 1] vote request from 2 , granted=false
-52026/08/22 14:15:39 [node 1] become candidate, term 5
-2026/08/22 14:15:39 [node 1] BECAME LEADER , term 5
+[debug] recieved line : "get x"
+[debug] parsed key: "x"
+[debug] Get returned : val="100" ok=true
+x = 100

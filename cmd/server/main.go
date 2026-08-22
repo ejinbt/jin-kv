@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 
 	"flag"
 
+	"github.com/ejinbt/jinkv/httpapi"
 	"github.com/ejinbt/jinkv/raft"
 	"github.com/ejinbt/jinkv/transport"
 	"github.com/ejinbt/jinkv/wal"
@@ -17,6 +19,7 @@ import (
 func main() {
 	myID := flag.Uint64("id", 1, "this node's ID")
 	myAddr := flag.String("addr", ":8080", "this node's address")
+	httpAddr := flag.String("httpaddr", ":9080", "this node's client-facing HTTP address")
 	flag.Parse()
 	peers := map[uint64]string{
 		1: "localhost:8080",
@@ -33,7 +36,6 @@ func main() {
 	t := transport.NewClient()
 	sm := raft.NewStateMachine()
 	r := raft.NewRaft(*myID, peers, w, t, sm)
-
 	r.Start() // strats the election timer + loop
 
 	go func() {
@@ -65,9 +67,12 @@ func main() {
 			fmt.Printf("proposed at index %d\n", index)
 		}
 	}()
-
+	httpServer := httpapi.NewServer(r)
+	http.HandleFunc("/get", httpServer.HandleGet)
+	go http.ListenAndServe(*httpAddr, nil)
 	// this blocks forever , serving incoming RPCs
 	if err := transport.StartServer(*myAddr, r); err != nil {
 		log.Fatalf("server failed : %v", err)
 	}
+
 }

@@ -1,4 +1,0 @@
-32026/08/22 14:15:38 [node 3] become candidate, term 3
-2026/08/22 14:15:38 [node 3] BECAME LEADER , term 3
-2026/08/22 14:15:39 [node 3] vote request from 2 , granted=true
-2026/08/22 14:15:39 [node 3] vote request from 1 , granted=true
