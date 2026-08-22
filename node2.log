@@ -1,1 +1,17 @@
-2026/08/01 08:06:17 [node 2] vote request from 1 , granted=true
+2026/08/22 14:15:22 [node 2] vote request from 1 , granted=true
+2026/08/22 14:15:38 [node 2] vote request from 3 , granted=true
+42026/08/22 14:15:39 [node 2] become candidate, term 4
+2026/08/22 14:15:39 [node 2] BECAME LEADER , term 4
+2026/08/22 14:15:39 [node 2] vote request from 1 , granted=false
+[debug] recieved line : "get k1"
+[debug] parsed key: "k1"
+[debug] Get returned : val="v1" ok=true
+k1 = v1
+[debug] recieved line : "get k4"
+[debug] parsed key: "k4"
+[debug] Get returned : val="v4" ok=true
+k4 = v4
+[debug] recieved line : "get k8"
+[debug] parsed key: "k8"
+[debug] Get returned : val="v8" ok=true
+k8 = v8
