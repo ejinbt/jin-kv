@@ -16,6 +16,7 @@ import (
 type Transport interface {
 	SendRequestVote(peerAddr string, args rpc.RequestVoteArgs) (rpc.RequestVoteReply, error)
 	SendAppendEntries(peerAddr string, args rpc.AppendEntriesArgs) (rpc.AppendEntriesReply, error)
+	SendInstallSnapshot(peerAddr string, args rpc.InstallSnapshotArgs) (rpc.InstallSnapshotReply, error)
 }
 
 type State int
@@ -462,6 +463,50 @@ func (r *Raft) tryAdvanceCommitIndex() {
 	r.maybeSnapshot()
 }
 
+// sendSnapshotToPeer loads the current snapshot , encodes it , and sends
+// it to the given peer via InstallSnapshot , On success , updates the
+// peer's nextIndex / matchIndex to reflect it's now caught up
+func (r *Raft) sendSnapshotToPeer(peerID uint64, peerAddr string, term uint64, leaderID uint64) {
+	snapshotPath := fmt.Sprintf("node%d.snapshot", r.id)
+
+	snapshot, err := LoadSnapshot(snapshotPath)
+	if err != nil {
+		log.Printf("[node %d] failed to load snapshot for peer %d:%v", r.id, peerID, err)
+		return
+	}
+	if snapshot == nil {
+		return // no snapshot exists yet , nothing to send
+	}
+	encoded, err := snapshot.Encode()
+	if err != nil {
+		log.Printf("[node %d] failed to encode the data ", r.id)
+		return
+	}
+	args := rpc.InstallSnapshotArgs{
+		Term:              term,
+		LeaderID:          leaderID,
+		LastIncludedIndex: snapshot.LastIncludedIndex,
+		LastIncludedTerm:  snapshot.LastIncludedTerm,
+		Data:              encoded}
+
+	reply, err := r.transport.SendInstallSnapshot(peerAddr, args)
+	if err != nil {
+		log.Printf("SendInstallSnapshot failed !")
+		return // missing ! falls through and updates nextIndex/matchIndex even though nothing was actually send successful
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if reply.Term > r.currentTerm {
+		// we've been superseded - step down immediately
+		r.currentTerm = reply.Term
+		r.state = Follower
+		r.votedFor = nil
+		return
+	}
+
+	r.nextIndex[peerID] = snapshot.LastIncludedIndex + 1
+	r.matchIndex[peerID] = snapshot.LastIncludedIndex
+}
 func (r *Raft) heartBeatLoop() {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -479,7 +524,18 @@ func (r *Raft) heartBeatLoop() {
 		// snapshot exactly what each peer needs WHIL STILL LOCKED
 
 		peerSnapshots := make(map[uint64]peerData)
+		var needsSnapshot []uint64 // peerIDs that need InstallSnapshot instead
 		for peerID := range r.peers {
+			prevIndexPos := r.toSlicePos(r.nextIndex[peerID])
+
+			if prevIndexPos < 0 {
+				// this peer needs entries we've already compacted away
+				needsSnapshot = append(needsSnapshot, peerID)
+				continue // skip building normal AppendEntries data for this peer
+			}
+
+			// existing AppendEntries peerData building continues here,
+			// unchanged - prevIndex , prevTerm , entriesToSend , etc
 			prevIndex := r.nextIndex[peerID] - 1
 			var prevTerm uint64
 			if prevIndex > 0 {
@@ -500,6 +556,11 @@ func (r *Raft) heartBeatLoop() {
 		}
 
 		r.mu.Unlock()
+
+		for _, peerID := range needsSnapshot {
+			peerAddr := r.peers[peerID] // safe to read after unlock ? think about this
+			go r.sendSnapshotToPeer(peerID, peerAddr, currentTerm, leaderID)
+		}
 
 		for peerID, peerAddr := range r.peers {
 			if peerID == r.id {
