@@ -1,8 +1,7 @@
-12026/08/22 16:35:17 [node 1] become candidate, term 1
-2026/08/22 16:35:17 [node 1] BECAME LEADER , term 1
-[debug] recieved line : "set x=100"
-proposed at index 2
-[debug] recieved line : "get x"
-[debug] parsed key: "x"
-[debug] Get returned : val="100" ok=true
-x = 100
+12026/08/28 13:47:04 [node 1] become candidate, term 1
+2026/08/28 13:47:04 [node 1] BECAME LEADER , term 1
+22026/08/28 13:47:15 [node 1] become candidate, term 2
+2026/08/28 13:47:15 [node 1] vote request from 2 , granted=true
+2026/08/28 13:47:15 [node 1] vote request from 2 , granted=false
+52026/08/28 13:47:15 [node 1] become candidate, term 5
+2026/08/28 13:47:15 [node 1] BECAME LEADER , term 5

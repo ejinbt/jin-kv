@@ -69,6 +69,7 @@ func main() {
 	}()
 	httpServer := httpapi.NewServer(r)
 	http.HandleFunc("/get", httpServer.HandleGet)
+	http.HandleFunc("/set", httpServer.HandleSet)
 	go http.ListenAndServe(*httpAddr, nil)
 	// this blocks forever , serving incoming RPCs
 	if err := transport.StartServer(*myAddr, r); err != nil {

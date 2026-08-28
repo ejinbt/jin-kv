@@ -92,6 +92,7 @@ type Raft struct {
 	transport         Transport
 	stateMachine      *StateMachine
 	lastSnapshotIndex uint64 // starts at 0
+	leaderID          uint64 // the most recently known leader's ID; 0 if unknown
 }
 
 type peerData struct {
@@ -318,6 +319,7 @@ func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntries
 		r.currentTerm = args.Term
 		r.votedFor = nil
 	}
+	r.leaderID = args.LeaderID
 	// this is a legitimate, current-or-newer leader — reset the timer
 	// NOW, regardless of whether the log consistency check below
 	// passes. A rejoining node that's still catching up should not
@@ -385,6 +387,24 @@ func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntries
 	reply := rpc.AppendEntriesReply{Term: r.currentTerm, Success: true}
 	return reply
 
+}
+
+// LeaderID return this node's best current knowledge of who the
+// cluster leader is. Returns 0 if unknown
+func (r *Raft) LeaderID() uint64 {
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.leaderID
+}
+
+// isLeader reports whether this node currently believes it is the leader
+func (r *Raft) IsLeader() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.state == Leader
 }
 
 func (r *Raft) becomeCandidate() {

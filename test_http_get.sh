@@ -1,14 +1,18 @@
 #!/bin/bash
-# test_http_get.sh
+# test_http_api.sh
 #
-# Focused test for the new HTTP /get client API endpoint:
-#   1. starts 3 nodes fresh, each with its own Raft port AND HTTP port
+# Full test of the HTTP client API — /get and /set:
+#   1. starts 3 nodes fresh, each with Raft + HTTP ports
 #   2. waits for a stable leader
-#   3. sets a value via the leader's stdin (the path we already know works)
-#   4. waits, then curls the LEADER's HTTP port specifically
-#   5. reports exactly what happened at each step, no ambiguity
+#   3. POSTs a set via the LEADER's HTTP /set — should succeed
+#   4. GETs it back from all 3 nodes' HTTP /get — should all agree
+#   5. tries /set on a FOLLOWER's HTTP port — should be rejected with
+#      a "not the leader, try node N" response, and N should match
+#      the actual leader
+#   6. retries the set against the correct leader ID from that
+#      response, to prove the redirect information is actually usable
 #
-# Usage: ./test_http_get.sh
+# Usage: ./test_http_api.sh
 # Run from the jin-kv project root.
 
 set -uo pipefail
@@ -80,14 +84,6 @@ start_node() {
     echo "$server_pid"
 }
 
-send_cmd() {
-    local fifo=$1
-    local cmd=$2
-    echo "$cmd" > "$fifo"
-}
-
-fifo_for() { eval echo "\$FIFO$1"; }
-
 find_leader() {
     local best_id="" best_ts=""
     for id in 1 2 3; do
@@ -128,14 +124,9 @@ PID_FOR_ID[3]=$(start_node 3 "${ADDR_FOR_ID[3]}" "${HTTPADDR_FOR_ID[3]}" "$LOG3"
 PIDS+=("${PID_FOR_ID[3]}")
 
 echo "node1 pid=${PID_FOR_ID[1]}  node2 pid=${PID_FOR_ID[2]}  node3 pid=${PID_FOR_ID[3]}"
-echo "waiting for all 3 Raft ports to come up..."
-wait_for_port 8080
-wait_for_port 8081
-wait_for_port 8082
-echo "waiting for all 3 HTTP ports to come up..."
-wait_for_port 9080
-wait_for_port 9081
-wait_for_port 9082
+echo "waiting for all Raft + HTTP ports to come up..."
+wait_for_port 8080; wait_for_port 8081; wait_for_port 8082
+wait_for_port 9080; wait_for_port 9081; wait_for_port 9082
 echo "all 6 ports confirmed up"
 
 echo "waiting 8s for election to stabilize..."
@@ -148,35 +139,119 @@ if [[ -z "$LEADER_ID" ]]; then
 fi
 echo "=== leader is node $LEADER_ID ==="
 
-echo "=== setting x=100 via node $LEADER_ID's stdin (the known-working path) ==="
-send_cmd "$(fifo_for $LEADER_ID)" "set x=100"
+FOLLOWER_ID=""
+for id in 1 2 3; do
+    if [[ "$id" != "$LEADER_ID" ]]; then
+        FOLLOWER_ID=$id
+        break
+    fi
+done
+echo "=== using node $FOLLOWER_ID as a known follower for the redirect test ==="
+
+LEADER_HTTP="${HTTPADDR_FOR_ID[$LEADER_ID]#:}"
+FOLLOWER_HTTP="${HTTPADDR_FOR_ID[$FOLLOWER_ID]#:}"
+
+echo ""
+echo "================ TEST 1: /set on the LEADER should succeed ================"
+echo "curl \"http://localhost:${LEADER_HTTP}/set?key=x&value=100\""
+SET_RESP=$(curl -s "http://localhost:${LEADER_HTTP}/set?key=x&value=100")
+echo "response: $SET_RESP"
 sleep 2
 
-echo "=== sanity check: confirming via stdin get on the SAME node ==="
-send_cmd "$(fifo_for $LEADER_ID)" "get x"
-sleep 1
-
 echo ""
-echo "================ RESULTS ================"
-echo "--- leader node $LEADER_ID log (stdin get should show x=100 here) ---"
-grep -A 3 '"get x"' "node${LEADER_ID}.log" | tail -8
-
-LEADER_HTTP_PORT="${HTTPADDR_FOR_ID[$LEADER_ID]#:}"
-echo ""
-echo "--- curling the LEADER's HTTP API directly (port $LEADER_HTTP_PORT) ---"
-echo "command: curl -v \"http://localhost:${LEADER_HTTP_PORT}/get?key=x\""
-curl -v "http://localhost:${LEADER_HTTP_PORT}/get?key=x" 2>&1
-
-echo ""
-echo ""
-echo "--- for comparison, curling ALL THREE nodes' HTTP ports ---"
+echo "================ TEST 2: /get on ALL 3 nodes should agree ================"
+ALL_AGREE=true
 for id in 1 2 3; do
     port="${HTTPADDR_FOR_ID[$id]#:}"
-    echo "-- node $id (http port $port) --"
-    curl -s "http://localhost:${port}/get?key=x"
-    echo ""
+    val=$(curl -s "http://localhost:${port}/get?key=x")
+    echo "node $id (port $port): $val"
+    if [[ "$val" != "100" ]]; then
+        ALL_AGREE=false
+    fi
 done
 
 echo ""
+echo "================ TEST 3: /set on a FOLLOWER should be rejected with a redirect ================"
+echo "curl -i \"http://localhost:${FOLLOWER_HTTP}/set?key=y&value=200\""
+FOLLOWER_SET_RESP=$(curl -s -i "http://localhost:${FOLLOWER_HTTP}/set?key=y&value=200")
+echo "$FOLLOWER_SET_RESP"
+
+STATUS_LINE=$(echo "$FOLLOWER_SET_RESP" | head -1)
+BODY=$(echo "$FOLLOWER_SET_RESP" | tail -1)
+
+echo ""
+echo "status line: $STATUS_LINE"
+echo "body: $BODY"
+
+REDIRECT_LEADER=$(echo "$BODY" | grep -oE "node [0-9]+" | grep -oE "[0-9]+")
+
+echo ""
+echo "================ TEST 4: retry against the leader ID from the redirect ================"
+if [[ -n "$REDIRECT_LEADER" ]]; then
+    echo "redirect pointed at node $REDIRECT_LEADER"
+    if [[ "$REDIRECT_LEADER" == "$LEADER_ID" ]]; then
+        echo "PASS: redirect correctly identified the real leader (node $LEADER_ID)"
+        REDIRECT_CORRECT=true
+    else
+        echo "FAIL: redirect said node $REDIRECT_LEADER but real leader is node $LEADER_ID"
+        REDIRECT_CORRECT=false
+    fi
+
+    REDIRECT_HTTP="${HTTPADDR_FOR_ID[$REDIRECT_LEADER]#:}"
+    echo "retrying set via node $REDIRECT_LEADER (port $REDIRECT_HTTP)..."
+    RETRY_RESP=$(curl -s "http://localhost:${REDIRECT_HTTP}/set?key=y&value=200")
+    echo "retry response: $RETRY_RESP"
+else
+    echo "FAIL: could not parse a leader ID out of the redirect response"
+    REDIRECT_CORRECT=false
+fi
+
+sleep 2
+
+echo ""
+echo "================ RESULTS ================"
+PASS=true
+
+echo "--- TEST 1: leader set succeeded? ---"
+if [[ "$SET_RESP" == *"proposed at index"* ]]; then
+    echo "PASS"
+else
+    echo "FAIL: $SET_RESP"
+    PASS=false
+fi
+
+echo "--- TEST 2: all nodes agree on x=100? ---"
+if $ALL_AGREE; then
+    echo "PASS"
+else
+    echo "FAIL"
+    PASS=false
+fi
+
+echo "--- TEST 3/4: follower correctly redirected to real leader? ---"
+if [[ "${REDIRECT_CORRECT:-false}" == "true" ]]; then
+    echo "PASS"
+else
+    echo "FAIL"
+    PASS=false
+fi
+
+echo "--- TEST 5: y=200 (set via redirect retry) visible on all nodes? ---"
+for id in 1 2 3; do
+    port="${HTTPADDR_FOR_ID[$id]#:}"
+    val=$(curl -s "http://localhost:${port}/get?key=y")
+    echo "node $id: y=$val"
+    if [[ "$val" != "200" ]]; then
+        PASS=false
+    fi
+done
+
+echo ""
+if $PASS; then
+    echo "=== OVERALL: PASS — HTTP client API fully verified, including leader redirect ==="
+else
+    echo "=== OVERALL: FAIL — see above ==="
+fi
+
 echo "=== done — cleaning up ==="
 sleep 1
