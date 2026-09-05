@@ -35,7 +35,10 @@ func main() {
 
 	t := transport.NewClient()
 	sm := raft.NewStateMachine()
-	r := raft.NewRaft(*myID, peers, w, t, sm)
+	r, err := raft.NewRaft(*myID, peers, w, t, sm)
+	if err != nil {
+		log.Fatalf("failed to create raft node:%v", err)
+	}
 	r.Start() // strats the election timer + loop
 
 	go func() {
@@ -43,15 +46,12 @@ func main() {
 
 		for scanner.Scan() {
 			line := scanner.Text()
-			fmt.Printf("[debug] recieved line : %q\n", line)
 			if line == "" {
 				continue
 			}
 			if strings.HasPrefix(line, "get ") {
 				key := strings.TrimPrefix(line, "get ")
-				fmt.Printf("[debug] parsed key: %q\n", key) // Temporary
 				val, ok := r.Get(key)
-				fmt.Printf("[debug] Get returned : val=%q ok=%v\n", val, ok) // Temporary
 				if ok {
 					fmt.Printf("%s = %s\n", key, val)
 				} else {

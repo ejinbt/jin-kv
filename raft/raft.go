@@ -93,6 +93,7 @@ type Raft struct {
 	stateMachine      *StateMachine
 	lastSnapshotIndex uint64 // starts at 0
 	leaderID          uint64 // the most recently known leader's ID; 0 if unknown
+	leaderGeneration  uint64 // increment every time this node becomes leader
 }
 
 type peerData struct {
@@ -101,8 +102,8 @@ type peerData struct {
 	prevTerm  uint64
 }
 
-func NewRaft(id uint64, peers map[uint64]string, w *wal.WAL, t Transport, s *StateMachine) *Raft {
-	return &Raft{
+func NewRaft(id uint64, peers map[uint64]string, w *wal.WAL, t Transport, s *StateMachine) (*Raft, error) {
+	r := &Raft{
 		id:           id,
 		peers:        peers,
 		wal:          w,
@@ -117,6 +118,13 @@ func NewRaft(id uint64, peers map[uint64]string, w *wal.WAL, t Transport, s *Sta
 		transport:    t,
 		stateMachine: s,
 	}
+	// recovery is mandatory - a Raft node that hasn't reconstructed its
+	// own durable state is not a valid node
+	if err := r.loadPersistedState(); err != nil {
+		return nil, fmt.Errorf("failed to load persisted state: %w", err)
+	}
+
+	return r, nil
 }
 
 // toSlicePos converts a Raft log index into a position in r.log,
@@ -155,7 +163,10 @@ func (r *Raft) becomeLeader() {
 	defer r.mu.Unlock()
 
 	r.state = Leader
+	r.leaderGeneration++
+	myGeneration := r.leaderGeneration
 	r.resetElectionTimer() // stop reacting to a timer that shouldn't matter anymore
+
 	lastIndex, _ := r.lastLogIndexAndTerm()
 
 	for peerID := range r.peers {
@@ -177,7 +188,7 @@ func (r *Raft) becomeLeader() {
 		return
 	}
 
-	go r.heartBeatLoop()
+	go r.heartBeatLoop(myGeneration)
 	log.Printf("[node %d] BECAME LEADER , term %d", r.id, r.currentTerm)
 }
 
@@ -238,7 +249,9 @@ func (r *Raft) requestVotes() {
 
 func (r *Raft) lastLogIndexAndTerm() (uint64, uint64) {
 	if len(r.log) == 0 {
-		return 0, 0
+		// log is empty , but entries may exist in a snapshot
+		// lofOffset tells us the highest index covered there
+		return r.logOffset, 0
 	}
 
 	last := r.log[len(r.log)-1]
@@ -358,6 +371,16 @@ func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntries
 		}
 	}
 	entriesToAppend := args.Entries[appendFrom:]
+
+	// guard: entries must line up with our current log/offset or our
+	// index math silently breaks. if there's a gap,reject and let the
+	// leader back off and retry (or send a snapshot)
+	if len(entriesToAppend) > 0 {
+		expectedNextIndex := r.logOffset + uint64(len(r.log)) + 1
+		if entriesToAppend[0].Index != expectedNextIndex {
+			return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
+		}
+	}
 
 	r.log = append(r.log, entriesToAppend...)
 	for _, entry := range entriesToAppend {
@@ -527,15 +550,54 @@ func (r *Raft) sendSnapshotToPeer(peerID uint64, peerAddr string, term uint64, l
 	r.nextIndex[peerID] = snapshot.LastIncludedIndex + 1
 	r.matchIndex[peerID] = snapshot.LastIncludedIndex
 }
-func (r *Raft) heartBeatLoop() {
+
+// loadPersistedState reconstructs this node's log , state machine and
+// snapshot-related bookkeeping from whatever exists on disk - called
+// once at startup, before the node starts participating in elections
+func (r *Raft) loadPersistedState() error {
+	snapshotPath := fmt.Sprintf("node%d.snapshot", r.id)
+	snapshot, err := LoadSnapshot(snapshotPath)
+	if err != nil {
+		return fmt.Errorf("failed to load snapshot : %w", err)
+	}
+
+	if snapshot != nil {
+		r.stateMachine.Restore(snapshot.Data)
+		r.logOffset = snapshot.LastIncludedIndex
+		r.lastApplied = snapshot.LastIncludedIndex
+		r.commitIndex = snapshot.LastIncludedIndex
+	}
+
+	allEntries, err := r.wal.ReadAll()
+	if err != nil {
+		return fmt.Errorf("cannot read WAL entries for node %d: %w", r.id, err)
+	}
+
+	var survivors []wal.Entry
+	for _, entry := range allEntries {
+		if entry.Index > r.logOffset {
+			survivors = append(survivors, entry)
+		}
+	}
+
+	r.log = survivors
+
+	for _, entry := range survivors {
+		r.lastApplied = entry.Index
+		r.stateMachine.Apply(entry)
+	}
+	return nil
+}
+
+func (r *Raft) heartBeatLoop(myGeneration uint64) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		r.mu.Lock()
-		if r.state != Leader {
+		if r.state != Leader || r.leaderGeneration != myGeneration {
 			r.mu.Unlock()
-			return // no longer leader , stop sending heartbeats
+			return // no longer leader, OR a newer leadership stint has started
 		}
 
 		currentTerm := r.currentTerm
@@ -552,6 +614,12 @@ func (r *Raft) heartBeatLoop() {
 				// this peer needs entries we've already compacted away
 				needsSnapshot = append(needsSnapshot, peerID)
 				continue // skip building normal AppendEntries data for this peer
+			}
+
+			// TEMPORARY DIAGNOSTIC
+			if prevIndexPos > len(r.log) {
+				log.Printf("[node %d] ABOUT TO CRASH: peer=%d nextIndex=%d logOffset=%d toSlicePos=%d len(r.log)=%d lastApplied=%d commitIndex=%d",
+					r.id, peerID, r.nextIndex[peerID], r.logOffset, prevIndexPos, len(r.log), r.lastApplied, r.commitIndex)
 			}
 
 			// existing AppendEntries peerData building continues here,
