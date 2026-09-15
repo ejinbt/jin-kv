@@ -397,3 +397,261 @@ policy (snapshot every N entries, matching etcd's --snapshot-count idea),
 call compactLog once a snapshot is saved, and eventually build
 InstallSnapshot for followers that fall too far behind to catch up via
 normal replication.
+
+## [Phase 5] — Making it something a stranger could actually use
+
+**The gap this phase closed**
+After Phase 4, jin-kv was a correct consensus engine that you could only
+talk to by typing into whichever node's terminal you happened to be
+staring at. That's fine for proving Raft works. It is not a usable
+system. The whole point of this phase was closing the distance between
+"a correct algorithm" and "something an external program could depend
+on."
+
+**The one real architectural decision**
+HTTP or extend the existing custom binary TCP protocol? Went with HTTP,
+as a completely separate listener on its own port, leaving the internal
+Raft RPC transport untouched. Reasoning: "real world use case" concretely
+means someone can `curl` it without first having to understand my binary
+framing format. That's also how actual systems split it — etcd exposes
+client traffic separately from its internal Raft traffic. Each node now
+runs two listeners: `-addr` for node-to-node Raft RPC, `-httpaddr` for
+clients.
+
+**`/get` — the easy one**
+Read the key from the query params, call `Get`, write the value back, or
+404 if absent. The only real learning was Go's server-side HTTP
+mechanics: `w.WriteHeader(code)` must come *before* any `w.Write(...)`,
+since writing the body implicitly finalizes headers with a 200. Also
+caught myself reaching for `req.Response.Status`, which is for
+client-side responses and would have done nothing (or panicked) here.
+
+Worth recording: while wiring this up I went back and reread my own doc
+comment on `Raft.Get` from weeks earlier, which explicitly said it isn't
+linearizable and isn't safe for real client-facing reads. That comment
+did its job — past-me warned present-me at exactly the right moment.
+Decided consciously to ship `/get` with the limitation documented at the
+API layer too rather than silently inherit it, and to treat proper §8
+linearizable reads as a named, still-open gap rather than something
+quietly forgotten.
+
+**`/set` — the interesting one**
+Writes must go through the leader, so this endpoint had to handle
+"you've hit the wrong node" meaningfully rather than just failing.
+
+First gap: a follower had no idea *who* the leader was. `r.state` told a
+node about itself, nothing told it about anyone else. Added a
+`leaderID` field, populated from `args.LeaderID` on every incoming
+`AppendEntries` — which is the natural place, since every heartbeat
+carries it — plus an exported `LeaderID()` accessor.
+
+Second decision: should the redirect response include the leader's HTTP
+*address*, or just its node ID? Went with just the ID. The reasoning
+holds up: the leader genuinely knows who the leader is (that's Raft
+state it owns), but it does *not* actually know or control whether some
+other node's HTTP address is currently correct or reachable. Encoding a
+guess about that into a protocol response bakes in a possible lie. Don't
+have one component assert facts about another's reachability that it
+can't verify.
+
+Third thing, and the one I'm most pleased with: I'd suggested a sentinel
+error (`ErrNotLeader` + `errors.Is`) so `/set` could distinguish "not
+the leader" from other `Propose` failures. Pushed back — just check
+`IsLeader()` *before* calling `Propose` at all. Simpler, and it makes
+any error `Propose` returns afterward unambiguously a real failure. The
+sentinel error would have been solving a problem I'd created by checking
+in the wrong order. Better instinct than mine on that one.
+
+**Verification**
+Built a test that does the full round trip: set via the leader's HTTP
+API, read back from all three nodes and confirm they agree, then
+deliberately hit `/set` on a *follower*, parse the leader ID out of the
+`421 Misdirected Request` response, and retry against that node.
+
+All passed. The redirect isn't just present, it's actually usable — the
+retry succeeded and replicated everywhere.
+
+There was a confusing stretch first where a manual `curl` kept returning
+"not found" for a key I'd just set. Rather than keep guessing, built the
+scripted version, which passed immediately. The earlier failure was
+almost certainly a stale binary or a process left over from a previous
+run — the kind of environment noise that's exactly why every phase in
+this project ended up with a proper test script instead of hand-typed
+verification.
+
+**What this phase actually produced**
+A system where someone who has never read the Raft paper can run
+`curl "http://localhost:9080/set?key=x&value=100"`, get correct
+distributed, fault-tolerant behavior, and be told where to go if they
+guessed the wrong node. That's the difference between an implementation
+and a thing.
+
+**Left undone on purpose**
+Sharding was the stretch goal and stayed a stretch goal — one Raft group
+owns all keys. Linearizable reads still aren't implemented, now
+documented in two places instead of one.
+
+## [Phase 6] — Chaos testing, four bugs, and the end of the road
+
+**What this phase was supposed to be**
+Cleanup and polish. It was not that.
+
+**What actually happened**
+Built a chaos test that was meaningfully harder than anything before it:
+a continuous write stream running the whole time, killing a follower
+mid-stream, then killing the leader too (leaving a single node that
+correctly can't form a quorum), then reviving both in sequence — all
+while writes keep arriving. Previous tests had always been sequential:
+break one thing, observe, fix, repeat. This one breaks overlapping
+things while the system is actively working.
+
+It found four real bugs. Each one was only findable after the previous
+one was fixed, which is its own lesson about how layered failures hide
+behind each other.
+
+**Bug 1 — overlapping heartbeat goroutines**
+`becomeLeader` launched `go r.heartBeatLoop()` every time a node won an
+election, but nothing guaranteed the *previous* loop had stopped. Under
+rapid leadership churn a node could become leader again faster than the
+old loop's 100ms tick could notice it should exit, leaving two
+generations of the same goroutine mutating `nextIndex`/`log`
+simultaneously. Fixed with a generation counter: each loop remembers
+which leadership stint it belongs to and exits immediately if a newer
+one has started, even if `state` still says Leader.
+
+**Bug 2 — restarted nodes came back with no history at all**
+`NewRaft` initialized `log: nil`, `logOffset: 0`, and nothing ever read
+the node's own WAL or snapshot back off disk. So a killed-and-revived
+node started as if it had never seen a write — despite `nodeN.wal`
+sitting right there with real data. This had been true since Phase 2 and
+never surfaced, because the leader's catch-up machinery always
+re-taught the revived node everything over the network fast enough to
+paper over it. The WAL's whole premise — "if I said I wrote it, it
+survives a crash" — had only ever been tested *within* a process, never
+*across* a restart.
+
+Fixed with `loadPersistedState`: restore the snapshot if one exists,
+replay any WAL entries not already covered by it, catch the state
+machine up. Then a design argument worth recording: my first instinct
+was to expose this as a separate `LoadPersistedState()` call, keeping
+`NewRaft` clean. Pushed back on that — if it's a separate call, any
+library consumer can simply forget it and get a silently broken node.
+Made it mandatory inside the constructor instead, with `NewRaft` now
+returning an error. Make invalid states unrepresentable; tidiness loses
+to correctness.
+
+**Bug 3 — the actual crash**
+`panic: slice bounds out of range [18:11]`, over and over, in
+`heartBeatLoop`. Two wrong diagnoses before the right one (blamed the
+goroutine overlap first, then `lastLogIndexAndTerm` returning 0 for an
+empty-but-offset log — that second one was a real bug worth fixing
+anyway, just not this one). Only found it by adding a log line printing
+every relevant variable right before the panic:
+
+```
+peer=1 nextIndex=26 logOffset=9 toSlicePos=16 len(r.log)=10 lastApplied=24
+```
+
+That made it obvious: the node's log covered indices 10-19, but it
+believed its last index was 25. Internally contradictory state. Root
+cause was `HandleAppendEntries` appending entries without checking they
+actually continue from where the log ends — after an InstallSnapshot
+wiped the log and jumped `logOffset`, subsequent entries could land at
+positions that broke the `r.log[0] == logOffset + 1` invariant
+everything else depends on. Fixed with an explicit contiguity guard.
+
+Third time in this project a multi-day mystery came down to something
+small and structural rather than something conceptually deep. Worth
+remembering: check the boring plumbing before assuming the algorithm is
+wrong.
+
+**Bug 4 — the fix for Bug 3 caused a liveness deadlock**
+Crash gone, but now the cluster couldn't elect a stable leader at all —
+terms climbing past 200 within a second, every node refusing every vote.
+Traced it with another targeted log line and found the backoff sequence:
+
+```
+incoming first index=18 → rejected
+incoming first index=17 → rejected
+...
+incoming first index=11 → rejected
+[node becomes candidate, term 28]
+```
+
+Eight round trips of one-step backoff, one index at a time, and then
+leadership changed before it reached index 10 — resetting `nextIndex`
+back to an optimistic high value and starting the crawl over. Under
+sub-second leadership churn it could never converge. Follower stays
+behind → nobody's log is up-to-date enough to win an election → no
+stable leader → backoff never finishes. Circular.
+
+Went back to the paper. §5.3 describes exactly this: the one-step
+decrement is what it prescribes, but it explicitly notes the protocol
+can be optimized by having the follower report the conflicting term and
+the first index it holds, letting the leader jump back in one step. It
+also notes, honestly, that this optimization is usually unnecessary
+"since failures happen infrequently" — which is precisely the assumption
+the chaos test deliberately violates.
+
+Two options: implement the optimization, or make the test gentler.
+Chose the optimization. Added `ConflictIndex`/`ConflictTerm` to
+`AppendEntriesReply`, had the follower report where its log actually
+ends when rejecting, and had the leader jump straight there. Eight round
+trips became one.
+
+**The result**
+```
+keys checked:                        22
+all 3 nodes agree, value present:    19
+all 3 nodes agree, value absent:     3
+REAL mismatches (nodes disagree):    0
+OVERALL: PASS
+```
+
+Zero divergence. Three nodes killed and revived in overlapping sequence
+during continuous writes, and every node ended with identical state. The
+three missing keys were accepted by a leader that died before reaching a
+majority — correctly lost, exactly what the paper specifies. Only
+committed entries are guaranteed to survive, and that guarantee held.
+
+No crashes. All three nodes alive at the end. Days earlier this panicked
+on every single run.
+
+---
+
+## Closing the whole thing out
+
+Six phases. Every one of them has a test behind it that demonstrates it
+working under real failure, not just theory:
+
+- WAL survives `kill -9` mid-write
+- A leader dies and the cluster elects a new one
+- A lone node correctly refuses to elect itself without quorum, and
+  recovers the instant quorum returns
+- A dead node returns and receives exactly the writes it missed
+- A node too far behind receives a full snapshot instead
+- A stranger can `curl` it and get correct distributed behavior without
+  knowing Raft exists
+- The whole thing survives overlapping failures during live writes with
+  zero divergence
+
+What I actually understand now that I didn't at the start: the
+difference between replicated and committed. Why a snapshot needs
+`lastIncludedTerm` and not just an index. Why reads are the hard part of
+consensus, not writes. Why "it compiles and the happy path works" is
+almost meaningless for a distributed system. How to debug something
+where the bug only appears when three processes interleave in a specific
+order — which is: add logging, isolate one variable, and stop guessing.
+
+Recurring lesson, three separate times: `Lock()` instead of `Unlock()`.
+A hardcoded `"node1.wal"` shared by every node. A missing `LeaderCommit`
+field that made correct code dead. Every multi-day mystery in this
+project was something small and structural, never something deep. The
+algorithm was almost always right; the plumbing around it was what broke.
+
+Known gaps, deliberately left and honestly named rather than quietly
+forgotten: reads aren't linearizable (§8 needs the heartbeat-majority
+check and the no-op guarantee, neither of which is done), no membership
+changes, no sharding, no TLS.
+
+That's the project. Built by hand, from the paper, proven under failure.
