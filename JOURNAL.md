@@ -1,11 +1,3 @@
-# DAY-1
-today i wrote the base of what is called WAL , which ensures the whole program survives the crash by ensuring all data is saved to disk after written . i heard terms like BigEndian , i heard it before when i was digging network programming years back , those time i actually convert to endian myself . but i don't think that much low-level is necessary in this age , anyways i wrote encode , decode , append functions . laid  the ground for WAL system . learn about fdatasync , fsync . how to compute checksum , the checksum goes before the data on disk , not after - because on recovery you need to verify before you trust , not other way around which leads to acting on corrupted bytes . then i came to know difference about sha256 and CRC . thats it for today 
-
-# DAY-2
-today was crazy day . i learned more about WAL , checksum , why we do checksum on append . how to check checksum above all that i proven our WAL system . learned about seeking a file with io.SeekStart , wrote a huge ReadAll function with lot of repeated error checks , typical golang and learned about unexpectedErrorEof . thats it for today 
-
-<mark>journal is written by claude code </mark>
-
 ## [Phase 1] — The WAL
 
 **What got built**
