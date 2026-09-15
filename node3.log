@@ -1,230 +1,38 @@
-2026/09/05 10:59:05 [node 3] vote request from 1 , granted=true
-2026/09/05 10:59:14 [node 3] vote request from 2 , granted=true
-2026/09/05 10:59:14 [node 3] vote request from 2 , granted=false
-52026/09/05 10:59:14 [node 3] become candidate, term 5
-2026/09/05 10:59:14 [node 3] BECAME LEADER , term 5
-62026/09/05 10:59:15 [node 3] become candidate, term 6
-2026/09/05 10:59:15 [node 3] vote request from 2 , granted=true
-82026/09/05 10:59:15 [node 3] become candidate, term 8
-2026/09/05 10:59:15 [node 3] BECAME LEADER , term 8
-2026/09/05 10:59:16 [node 3] vote request from 1 , granted=true
-102026/09/05 10:59:16 [node 3] become candidate, term 10
-2026/09/05 10:59:16 [node 3] BECAME LEADER , term 10
-2026/09/05 10:59:30 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:30 [node 3] vote request from 2 , granted=false
-132026/09/05 10:59:30 [node 3] become candidate, term 13
-142026/09/05 10:59:31 [node 3] become candidate, term 14
-2026/09/05 10:59:31 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:31 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:31 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:31 [node 3] vote request from 1 , granted=false
-182026/09/05 10:59:31 [node 3] become candidate, term 18
-2026/09/05 10:59:31 [node 3] vote request from 1 , granted=false
-202026/09/05 10:59:31 [node 3] become candidate, term 20
-2026/09/05 10:59:31 [node 3] vote request from 2 , granted=false
-222026/09/05 10:59:31 [node 3] become candidate, term 22
-2026/09/05 10:59:31 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:31 [node 3] vote request from 1 , granted=false
-252026/09/05 10:59:31 [node 3] become candidate, term 25
-2026/09/05 10:59:31 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:31 [node 3] vote request from 1 , granted=false
-282026/09/05 10:59:31 [node 3] become candidate, term 28
-2026/09/05 10:59:32 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:32 [node 3] vote request from 1 , granted=false
-312026/09/05 10:59:32 [node 3] become candidate, term 31
-2026/09/05 10:59:32 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:32 [node 3] vote request from 2 , granted=false
-342026/09/05 10:59:32 [node 3] become candidate, term 34
-2026/09/05 10:59:32 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:32 [node 3] vote request from 2 , granted=false
-372026/09/05 10:59:32 [node 3] become candidate, term 37
-2026/09/05 10:59:32 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:32 [node 3] vote request from 2 , granted=false
-402026/09/05 10:59:32 [node 3] become candidate, term 40
-2026/09/05 10:59:32 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:32 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:33 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:33 [node 3] vote request from 1 , granted=false
-452026/09/05 10:59:33 [node 3] become candidate, term 45
-462026/09/05 10:59:33 [node 3] become candidate, term 46
-2026/09/05 10:59:33 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:33 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:33 [node 3] vote request from 2 , granted=false
-502026/09/05 10:59:33 [node 3] become candidate, term 50
-2026/09/05 10:59:33 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:33 [node 3] vote request from 2 , granted=false
-532026/09/05 10:59:33 [node 3] become candidate, term 53
-2026/09/05 10:59:34 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:34 [node 3] vote request from 2 , granted=false
-562026/09/05 10:59:34 [node 3] become candidate, term 56
-2026/09/05 10:59:34 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:34 [node 3] vote request from 2 , granted=false
-592026/09/05 10:59:34 [node 3] become candidate, term 59
-2026/09/05 10:59:34 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:34 [node 3] vote request from 2 , granted=false
-622026/09/05 10:59:34 [node 3] become candidate, term 62
-2026/09/05 10:59:34 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:34 [node 3] vote request from 2 , granted=false
-652026/09/05 10:59:34 [node 3] become candidate, term 65
-2026/09/05 10:59:34 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:35 [node 3] vote request from 2 , granted=false
-682026/09/05 10:59:35 [node 3] become candidate, term 68
-2026/09/05 10:59:35 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:35 [node 3] vote request from 2 , granted=false
-712026/09/05 10:59:35 [node 3] become candidate, term 71
-2026/09/05 10:59:35 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:35 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:35 [node 3] vote request from 1 , granted=false
-752026/09/05 10:59:35 [node 3] become candidate, term 75
-2026/09/05 10:59:35 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:35 [node 3] vote request from 1 , granted=false
-782026/09/05 10:59:35 [node 3] become candidate, term 78
-2026/09/05 10:59:35 [node 3] vote request from 2 , granted=false
-802026/09/05 10:59:35 [node 3] become candidate, term 80
-2026/09/05 10:59:35 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:35 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:36 [node 3] vote request from 2 , granted=false
-842026/09/05 10:59:36 [node 3] become candidate, term 84
-2026/09/05 10:59:36 [node 3] vote request from 1 , granted=false
-862026/09/05 10:59:36 [node 3] become candidate, term 86
-2026/09/05 10:59:36 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:36 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:36 [node 3] vote request from 2 , granted=false
-902026/09/05 10:59:36 [node 3] become candidate, term 90
-2026/09/05 10:59:36 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:36 [node 3] vote request from 2 , granted=false
-932026/09/05 10:59:36 [node 3] become candidate, term 93
-2026/09/05 10:59:36 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:37 [node 3] vote request from 2 , granted=false
-962026/09/05 10:59:37 [node 3] become candidate, term 96
-2026/09/05 10:59:37 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:37 [node 3] vote request from 2 , granted=false
-992026/09/05 10:59:37 [node 3] become candidate, term 99
-2026/09/05 10:59:37 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:37 [node 3] vote request from 1 , granted=false
-1022026/09/05 10:59:37 [node 3] become candidate, term 102
-2026/09/05 10:59:37 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:37 [node 3] vote request from 1 , granted=false
-1052026/09/05 10:59:37 [node 3] become candidate, term 105
-2026/09/05 10:59:37 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:37 [node 3] vote request from 1 , granted=false
-1082026/09/05 10:59:37 [node 3] become candidate, term 108
-2026/09/05 10:59:38 [node 3] vote request from 2 , granted=false
-1102026/09/05 10:59:38 [node 3] become candidate, term 110
-2026/09/05 10:59:38 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:38 [node 3] vote request from 2 , granted=false
-1132026/09/05 10:59:38 [node 3] become candidate, term 113
-2026/09/05 10:59:38 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:38 [node 3] vote request from 1 , granted=false
-1162026/09/05 10:59:38 [node 3] become candidate, term 116
-2026/09/05 10:59:38 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:38 [node 3] vote request from 1 , granted=false
-1192026/09/05 10:59:38 [node 3] become candidate, term 119
-2026/09/05 10:59:38 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:38 [node 3] vote request from 1 , granted=false
-1222026/09/05 10:59:39 [node 3] become candidate, term 122
-2026/09/05 10:59:39 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:39 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:39 [node 3] vote request from 2 , granted=false
-1262026/09/05 10:59:39 [node 3] become candidate, term 126
-2026/09/05 10:59:39 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:39 [node 3] vote request from 2 , granted=false
-1292026/09/05 10:59:39 [node 3] become candidate, term 129
-2026/09/05 10:59:39 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:39 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:39 [node 3] vote request from 1 , granted=false
-1332026/09/05 10:59:39 [node 3] become candidate, term 133
-2026/09/05 10:59:39 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:39 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:40 [node 3] vote request from 2 , granted=false
-1372026/09/05 10:59:40 [node 3] become candidate, term 137
-2026/09/05 10:59:40 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:40 [node 3] vote request from 2 , granted=false
-1402026/09/05 10:59:40 [node 3] become candidate, term 140
-2026/09/05 10:59:40 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:40 [node 3] vote request from 1 , granted=false
-1432026/09/05 10:59:40 [node 3] become candidate, term 143
-2026/09/05 10:59:40 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:40 [node 3] vote request from 1 , granted=false
-1462026/09/05 10:59:40 [node 3] become candidate, term 146
-2026/09/05 10:59:40 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:40 [node 3] vote request from 1 , granted=false
-1492026/09/05 10:59:40 [node 3] become candidate, term 149
-2026/09/05 10:59:40 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:41 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:41 [node 3] vote request from 1 , granted=false
-1522026/09/05 10:59:41 [node 3] become candidate, term 152
-2026/09/05 10:59:41 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:41 [node 3] vote request from 1 , granted=false
-1552026/09/05 10:59:41 [node 3] become candidate, term 155
-2026/09/05 10:59:41 [node 3] vote request from 2 , granted=false
-1572026/09/05 10:59:41 [node 3] become candidate, term 157
-2026/09/05 10:59:41 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:41 [node 3] vote request from 2 , granted=false
-1602026/09/05 10:59:41 [node 3] become candidate, term 160
-2026/09/05 10:59:41 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:41 [node 3] vote request from 2 , granted=false
-1632026/09/05 10:59:42 [node 3] become candidate, term 163
-2026/09/05 10:59:42 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:42 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:42 [node 3] vote request from 2 , granted=false
-1672026/09/05 10:59:42 [node 3] become candidate, term 167
-2026/09/05 10:59:42 [node 3] vote request from 1 , granted=false
-1692026/09/05 10:59:42 [node 3] become candidate, term 169
-2026/09/05 10:59:42 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:42 [node 3] vote request from 1 , granted=false
-1722026/09/05 10:59:42 [node 3] become candidate, term 172
-2026/09/05 10:59:42 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:42 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:42 [node 3] vote request from 1 , granted=false
-1762026/09/05 10:59:42 [node 3] become candidate, term 176
-2026/09/05 10:59:43 [node 3] vote request from 2 , granted=false
-1782026/09/05 10:59:43 [node 3] become candidate, term 178
-2026/09/05 10:59:43 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:43 [node 3] vote request from 2 , granted=false
-1812026/09/05 10:59:43 [node 3] become candidate, term 181
-2026/09/05 10:59:43 [node 3] vote request from 1 , granted=false
-1832026/09/05 10:59:43 [node 3] become candidate, term 183
-2026/09/05 10:59:43 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:43 [node 3] vote request from 1 , granted=false
-1862026/09/05 10:59:43 [node 3] become candidate, term 186
-2026/09/05 10:59:43 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:43 [node 3] vote request from 1 , granted=false
-1892026/09/05 10:59:43 [node 3] become candidate, term 189
-2026/09/05 10:59:44 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:44 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:44 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:44 [node 3] vote request from 2 , granted=false
-1942026/09/05 10:59:44 [node 3] become candidate, term 194
-2026/09/05 10:59:44 [node 3] vote request from 1 , granted=false
-1962026/09/05 10:59:44 [node 3] become candidate, term 196
-2026/09/05 10:59:44 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:44 [node 3] vote request from 1 , granted=false
-1992026/09/05 10:59:44 [node 3] become candidate, term 199
-2026/09/05 10:59:44 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:44 [node 3] vote request from 2 , granted=false
-2022026/09/05 10:59:44 [node 3] become candidate, term 202
-2026/09/05 10:59:45 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:45 [node 3] vote request from 2 , granted=false
-2052026/09/05 10:59:45 [node 3] become candidate, term 205
-2062026/09/05 10:59:45 [node 3] become candidate, term 206
-2026/09/05 10:59:45 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:45 [node 3] vote request from 2 , granted=false
-2092026/09/05 10:59:45 [node 3] become candidate, term 209
-2026/09/05 10:59:45 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:45 [node 3] vote request from 1 , granted=false
-2122026/09/05 10:59:45 [node 3] become candidate, term 212
-2026/09/05 10:59:45 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:45 [node 3] vote request from 2 , granted=false
-2152026/09/05 10:59:45 [node 3] become candidate, term 215
-2026/09/05 10:59:45 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:45 [node 3] vote request from 1 , granted=false
-2182026/09/05 10:59:46 [node 3] become candidate, term 218
-2026/09/05 10:59:46 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:46 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:46 [node 3] vote request from 1 , granted=false
-2222026/09/05 10:59:46 [node 3] become candidate, term 222
-2026/09/05 10:59:46 [node 3] vote request from 2 , granted=false
-2026/09/05 10:59:46 [node 3] vote request from 1 , granted=false
-2026/09/05 10:59:46 [node 3] vote request from 2 , granted=false
-2252026/09/05 10:59:46 [node 3] become candidate, term 225
+2026/09/15 15:00:41 [node 3] vote request from 1 , granted=false
+2026/09/15 15:00:41 [node 3] vote request from 2 , granted=true
+2026/09/15 15:00:42 [node 3] vote request from 2 , granted=false
+52026/09/15 15:00:42 [node 3] become candidate, term 5
+2026/09/15 15:00:42 [node 3] BECAME LEADER , term 5
+2026/09/15 15:00:42 [node 3] vote request from 1 , granted=true
+72026/09/15 15:00:43 [node 3] become candidate, term 7
+2026/09/15 15:00:43 [node 3] BECAME LEADER , term 7
+2026/09/15 15:00:43 [node 3] vote request from 2 , granted=true
+92026/09/15 15:00:44 [node 3] become candidate, term 9
+2026/09/15 15:00:44 [node 3] vote request from 1 , granted=true
+112026/09/15 15:00:48 [node 3] become candidate, term 11
+122026/09/15 15:00:48 [node 3] become candidate, term 12
+132026/09/15 15:00:48 [node 3] become candidate, term 13
+142026/09/15 15:00:48 [node 3] become candidate, term 14
+152026/09/15 15:00:48 [node 3] become candidate, term 15
+162026/09/15 15:00:49 [node 3] become candidate, term 16
+172026/09/15 15:00:49 [node 3] become candidate, term 17
+182026/09/15 15:00:49 [node 3] become candidate, term 18
+192026/09/15 15:00:49 [node 3] become candidate, term 19
+202026/09/15 15:00:50 [node 3] become candidate, term 20
+212026/09/15 15:00:50 [node 3] become candidate, term 21
+222026/09/15 15:00:50 [node 3] become candidate, term 22
+232026/09/15 15:00:50 [node 3] become candidate, term 23
+242026/09/15 15:00:51 [node 3] become candidate, term 24
+252026/09/15 15:00:51 [node 3] become candidate, term 25
+262026/09/15 15:00:51 [node 3] become candidate, term 26
+272026/09/15 15:00:51 [node 3] become candidate, term 27
+282026/09/15 15:00:52 [node 3] become candidate, term 28
+2026/09/15 15:00:52 [node 3] BECAME LEADER , term 28
+2026/09/15 15:00:56 [node 3] vote request from 2 , granted=true
+302026/09/15 15:00:56 [node 3] become candidate, term 30
+2026/09/15 15:00:57 [node 3] BECAME LEADER , term 30
+2026/09/15 15:00:57 [node 3] vote request from 1 , granted=true
+2026/09/15 15:00:58 [node 3] vote request from 2 , granted=true
+332026/09/15 15:00:58 [node 3] become candidate, term 33
+2026/09/15 15:00:58 [node 3] BECAME LEADER , term 33
+2026/09/15 15:00:58 [node 3] vote request from 1 , granted=false

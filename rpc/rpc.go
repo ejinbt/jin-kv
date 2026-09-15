@@ -68,6 +68,12 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    uint64
 	Success bool
+
+	// optimization from 5.3 : on rejection , tell the leader which term
+	// confilicted and the first index this follower has for that term
+	// so it can skip back a whole term at once instead of one entry
+	ConflictTerm  uint64
+	ConflictIndex uint64
 }
 
 func EncodeAppendEntriesArgs(args AppendEntriesArgs) ([]byte, error) {

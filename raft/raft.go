@@ -378,7 +378,12 @@ func (r *Raft) HandleAppendEntries(args rpc.AppendEntriesArgs) rpc.AppendEntries
 	if len(entriesToAppend) > 0 {
 		expectedNextIndex := r.logOffset + uint64(len(r.log)) + 1
 		if entriesToAppend[0].Index != expectedNextIndex {
-			return rpc.AppendEntriesReply{Term: r.currentTerm, Success: false}
+			return rpc.AppendEntriesReply{
+				Term:          r.currentTerm,
+				Success:       false,
+				ConflictIndex: expectedNextIndex, // "start from here instead"
+				ConflictTerm:  0,                 // no term conflict , just a gap
+			}
 		}
 	}
 
@@ -690,7 +695,14 @@ func (r *Raft) heartBeatLoop(myGeneration uint64) {
 					}
 					// if snap.entries was empty (pure heartbeat) , nothing changes . already upto date
 				} else {
-					if r.nextIndex[peerID] > 1 {
+					// 5.3 optimization: if the follower told us exactly where its log
+					// actually ends (ConflictIndex) , jump straight there instead of
+					// crawling back one index per round trip
+					if reply.ConflictIndex > 0 {
+						r.nextIndex[peerID] = reply.ConflictIndex
+					} else if r.nextIndex[peerID] > 1 {
+						// fall back to the paper's basic one stip decrement if the
+						// follower didn't give us a hint
 						r.nextIndex[peerID]--
 					}
 				}
